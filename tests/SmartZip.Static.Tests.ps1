@@ -102,3 +102,40 @@ Describe 'NestingGate' {
         $ok | Should Be $true
     }
 }
+
+Describe 'CreateZipPathInit' {
+
+    It 'CreateZip method body can be extracted (excludes OpenZip)' {
+        [string]::IsNullOrEmpty($script:CreateZipBody) | Should Be $false
+        $script:CreateZipBody | Should Match 'CreateZip\s*\('
+        $script:CreateZipBody | Should Not Match 'OpenZip\s*\('
+    }
+
+    It 'mixed file/folder branch still concatenates quoted paths with path .=' {
+        $ok = Test-Regex -Text $script:CreateZipBody -Pattern `
+            "(?s);文件文件夹混合\s*\{.*?path\s*\.=\s*'\s*""'\s*i\s*'""\s*'"
+        $ok | Should Be $true
+    }
+
+    It 'mixed branch initializes path := "" before path .=' {
+        $ok = Test-Regex -Text $script:CreateZipBody -Pattern `
+            '(?s);文件文件夹混合\s*\{\s*path\s*:=\s*""\s*for\s+i\s+in\s+this\.arr\s+path\s*\.='
+        $ok | Should Be $true
+    }
+
+    It 'path empty-init appears before first path .= inside mixed branch body' {
+        $m = [regex]::Match(
+            $script:CreateZipBody,
+            '(?s);文件文件夹混合\s*\{(.*?)this\.Run7z'
+        )
+        $m.Success | Should Be $true
+        $mixed = $m.Groups[1].Value
+
+        $init = [regex]::Match($mixed, 'path\s*:=\s*""')
+        $concat = [regex]::Match($mixed, 'path\s*\.=')
+
+        $init.Success | Should Be $true
+        $concat.Success | Should Be $true
+        ($init.Index -lt $concat.Index) | Should Be $true
+    }
+}

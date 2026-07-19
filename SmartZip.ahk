@@ -789,6 +789,7 @@ class SmartZip
             this.Run7z(hideBool, 'a', this.AUO(nameNoExt, ext), args ' "' this.arr[1] '"', hideBool, , A_LineNumber)
         else	;文件文件夹混合
         {
+            path := ""
             for i in this.arr
                 path .= ' "' i '" '
             this.Run7z(hideBool, 'a', this.AUO(RegExReplace(A_WorkingDir, ".+\\"), ext), args path, hideBool, , A_LineNumber)
