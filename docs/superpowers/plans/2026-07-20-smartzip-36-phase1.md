@@ -21,6 +21,8 @@
 - 正常解析恢复后必须保留 current 的 `速度2` 文本更新。
 - 不迁移 hide 单位、hide 条件、盘符命名、密码分类、设置排序和其他未说明差异。
 - 当前环境缺 AutoHotkey v2 或 7-Zip 时，只能报告静态验证结果。
+- 运行时测试使用 `C:\Tool\7-Zip-Zstandard`（已确认 7-Zip 26.02 ZS v1.5.7 R1）。
+- 验证通过后部署到 `C:\Tool\SmartZip`；先备份旧 `SmartZip.exe`，只替换 EXE，保留现有 `SmartZip.ini` 与 `Contextmenu.exe`。
 
 ---
 
@@ -696,10 +698,14 @@ git commit -m "feat: add safe 3.6 GUI error recovery"
 - Verify: `SmartZip.ahk`
 - Verify: `tests/SmartZip.Static.Tests.ps1`
 - Verify: `docs/superpowers/specs/2026-07-20-smartzip-36-phase1-design.md`
+- Build: a temporary `SmartZip.exe` outside tracked source
+- Deploy: `C:\Tool\SmartZip\SmartZip.exe`
+- Preserve: `C:\Tool\SmartZip\SmartZip.ini`
+- Preserve: `C:\Tool\SmartZip\Contextmenu.exe`
 
 **Interfaces:**
-- Consumes: all Task 1–4 commits.
-- Produces: an evidence-backed completion report; no product change unless a failed check sends work back to its owning task.
+- Consumes: all Task 1–4 commits and `C:\Tool\7-Zip-Zstandard`.
+- Produces: an evidence-backed completion report and, after verification, a backed-up deployment at `C:\Tool\SmartZip`.
 
 - [ ] **Step 1: Run the full static suite from a clean PowerShell**
 
@@ -754,11 +760,14 @@ Expected:
 
 ```powershell
 $ahk = Get-Command AutoHotkey64.exe,AutoHotkey.exe -ErrorAction SilentlyContinue
-$seven = Get-Command 7z.exe,7zG.exe,7zFM.exe -ErrorAction SilentlyContinue
+$sevenDir = 'C:\Tool\7-Zip-Zstandard'
+$seven = Get-ChildItem -LiteralPath $sevenDir -File |
+    Where-Object { $_.Name -in '7z.exe','7zG.exe','7zFM.exe' }
 "AutoHotkeyFound=$([bool]$ahk) SevenZipTools=$($seven.Count)"
+& (Join-Path $sevenDir '7z.exe') i | Select-Object -First 4
 ```
 
-Expected in the current environment: AutoHotkey v2 and the complete 7-Zip tool set may be unavailable. If either prerequisite is missing, record T1–T16 as `未执行：缺少运行时` and make no runtime-success claim.
+Expected in the current environment: `SevenZipTools=3` and version output starts with `7-Zip 26.02 ZS v1.5.7 R1`; AutoHotkey is not on PATH. Obtain an official portable AutoHotkey v2 + Ahk2Exe toolchain in ignored scratch storage rather than installing system-wide. Verify downloaded hashes or signatures and record their source/version before use.
 
 - [ ] **Step 6: If the runtime prerequisites exist, execute T1–T16**
 
@@ -785,14 +794,63 @@ Run this matrix:
 
 Expected: every executed item passes. A failure returns to the owning task; do not weaken a static test to hide it.
 
-- [ ] **Step 7: Confirm final commit history and clean tree**
+- [ ] **Step 7: Build the verified executable in temporary storage**
+
+With official portable paths resolved as `$ahkBase` and `$ahkCompiler`, run:
+
+```powershell
+$buildDir = Join-Path $env:TEMP 'smartzip-36-build'
+New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+$builtExe = Join-Path $buildDir 'SmartZip.exe'
+& $ahkCompiler /in (Resolve-Path '.\SmartZip.ahk') /out $builtExe /base $ahkBase
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $builtExe)) { exit 1 }
+Get-Item -LiteralPath $builtExe | Select-Object FullName,Length,LastWriteTime
+Get-FileHash -LiteralPath $builtExe -Algorithm SHA256
+```
+
+Expected: compiler exits successfully, a non-empty `SmartZip.exe` exists, and its SHA-256 is recorded. Do not deploy an executable built from a dirty or unreviewed source state.
+
+- [ ] **Step 8: Back up and deploy only `SmartZip.exe`**
+
+```powershell
+$deployDir = 'C:\Tool\SmartZip'
+$deployedExe = Join-Path $deployDir 'SmartZip.exe'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$backupExe = Join-Path $deployDir "SmartZip.exe.bak-$stamp"
+$iniHashBefore = (Get-FileHash (Join-Path $deployDir 'SmartZip.ini') -Algorithm SHA256).Hash
+$contextHashBefore = (Get-FileHash (Join-Path $deployDir 'Contextmenu.exe') -Algorithm SHA256).Hash
+Copy-Item -LiteralPath $deployedExe -Destination $backupExe
+Copy-Item -LiteralPath $builtExe -Destination $deployedExe -Force
+if ((Get-FileHash $builtExe -Algorithm SHA256).Hash -ne
+    (Get-FileHash $deployedExe -Algorithm SHA256).Hash) { exit 1 }
+```
+
+Expected: timestamped backup exists; deployed EXE hash equals the verified build. Neither INI nor Contextmenu is overwritten.
+
+- [ ] **Step 9: Smoke-test the deployed EXE against the local 7-Zip**
+
+Use a temporary directory containing a small text file and archive. Exercise the deployed `a`, `x`, and `xc` entry points with `SmartZip.ini` still pointing to `C:\Tool\7-Zip-Zstandard`; verify the expected archive/output appears and processes exit. If any smoke test fails, restore `$backupExe` immediately and report the failure.
+
+- [ ] **Step 10: Verify preserved deployment files and record hashes**
+
+```powershell
+$iniHashAfter = (Get-FileHash (Join-Path $deployDir 'SmartZip.ini') -Algorithm SHA256).Hash
+$contextHashAfter = (Get-FileHash (Join-Path $deployDir 'Contextmenu.exe') -Algorithm SHA256).Hash
+if ($iniHashAfter -ne $iniHashBefore -or $contextHashAfter -ne $contextHashBefore) { exit 1 }
+Get-FileHash $deployedExe,$backupExe,(Join-Path $deployDir 'SmartZip.ini'),
+    (Join-Path $deployDir 'Contextmenu.exe') -Algorithm SHA256
+```
+
+Expected: INI and Contextmenu hashes are unchanged; new and backup EXE hashes plus backup path are recorded.
+
+- [ ] **Step 11: Confirm final commit history and clean tree**
 
 ```powershell
 git log --oneline -6
 git status --porcelain
 ```
 
-Expected: four focused implementation commits after the plan commit; `git status --porcelain` has no output.
+Expected: four focused implementation commits plus any explicit plan/deployment-documentation commit; `git status --porcelain` has no output.
 
 ## Self-Review
 
@@ -802,3 +860,4 @@ Expected: four focused implementation commits after the plan commit; `git status
 - **Task dependencies:** Task 2 owns the Init exclude builder; Task 3 adds PID fields without changing exclude behavior; Task 4 consumes Task 3’s exact PID contract.
 - **TDD order:** Each product change follows a focused RED test and ends with focused plus full GREEN verification.
 - **Scope:** No task modifies the OUT areas, `Contextmenu.ahk`, INI defaults, password behavior or hide-size units.
+- **Deployment safety:** Task 5 builds from reviewed source, backs up the old EXE, preserves INI/Contextmenu hashes, and restores the backup on smoke-test failure.
