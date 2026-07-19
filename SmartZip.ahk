@@ -1062,6 +1062,12 @@ class SmartZip
                 if matches.Length != 1
                     return ClearExactPid()
 
+                cmdLine := ""
+                try
+                    cmdLine := matches[1].CommandLine
+                if !path || !cmdLine || !InStr(cmdLine, path)
+                    return ClearExactPid()
+
                 this.pid := matches[1].ProcessID
                 if !this.pid
                     return ClearExactPid()
@@ -1080,7 +1086,10 @@ class SmartZip
                 SetTimer(WinGetPID, 0)
             }
             catch
+            {
+                winmgmts := ""
                 ClearExactPid()
+            }
 
             ClearExactPid()
             {
@@ -1091,10 +1100,26 @@ class SmartZip
 
             EscapeCharacter(str)
             {
-                str := StrReplace(str, "\", "\\")
-                for char in ["[", "]", "^"]
-                    str := StrReplace(str, char, "_")
-                return str
+                out := ""
+                Loop Parse str
+                {
+                    switch A_LoopField
+                    {
+                    case "\":
+                        out .= "\\"
+                    case "[":
+                        out .= "[[]"
+                    case "]":
+                        out .= "[]]"
+                    case "%":
+                        out .= "[%]"
+                    case "_":
+                        out .= "[_]"
+                    default:
+                        out .= A_LoopField
+                    }
+                }
+                return out
             }
 
             GetSize()

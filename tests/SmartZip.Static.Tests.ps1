@@ -351,18 +351,32 @@ Describe 'PidAndWmiSafety' {
     It 'WinGetPID requires exactly one WMI match' {
         $script:Run7zBody | Should Match 'matches\.Length\s*!=\s*1'
         $script:Run7zBody | Should Match 'this\.exactPid\s*:=\s*true'
+        # Source order: non-unique clear → literal CommandLine/path rejection → PID truthiness clear → exactPid true
+        $ok = Test-Regex -Text $script:Run7zBody -Pattern `
+            '(?s)matches\.Length\s*!=\s*1.*?ClearExactPid\(\).*?InStr\s*\([^)]*path[^)]*\).*?ClearExactPid\(\).*!this\.pid.*?ClearExactPid\(\).*this\.exactPid\s*:=\s*true'
+        $ok | Should Be $true
     }
 
     It 'WinGetPID has a soft failure path' {
         $script:Run7zBody | Should Match 'try'
         $script:Run7zBody | Should Match 'this\.exactPid\s*:=\s*false'
+        # catch must reset sticky winmgmts then clear exact bind state
+        $ok = Test-Regex -Text $script:Run7zBody -Pattern `
+            '(?s)catch\b.*?winmgmts\s*:=\s*""\s*.*?(?:ClearExactPid\(\)|this\.pid\s*:=\s*"".*?this\.exactPid\s*:=\s*false)'
+        $ok | Should Be $true
     }
 
     It 'path escaping covers recovered special characters' {
         $script:Run7zBody | Should Match 'EscapeCharacter'
-        foreach ($char in @('\[', '\]', '\^')) {
-            $script:Run7zBody | Should Match $char
+        # Character-by-character WQL LIKE builder for literal [ ] % _
+        $script:Run7zBody | Should Match 'Loop\s+Parse'
+        foreach ($token in @('\[\[\]', '\[\]\]', '\[%\]', '\[_\]')) {
+            $script:Run7zBody | Should Match $token
         }
+        # Authorization uses case-insensitive literal InStr on original unescaped path
+        $ok = Test-Regex -Text $script:Run7zBody -Pattern `
+            '(?s)InStr\s*\(\s*\w+\s*,\s*path\b'
+        $ok | Should Be $true
     }
 
     It 'CMDPID code is not moved into the GUI PID binding' {
