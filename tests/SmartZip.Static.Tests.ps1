@@ -223,3 +223,36 @@ Describe 'SettingsUnZipKey' {
         $ok | Should Be $true
     }
 }
+
+Describe 'VersionBanner' {
+
+    It 'MainVersion is 3.6' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'MainVersion\s*:=\s*"3\.6"'
+        $ok | Should Be $true
+    }
+
+    It 'buildVersion is 20' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'buildVersion\s*:=\s*20\b'
+        $ok | Should Be $true
+    }
+
+    It 'buileTime matches the recovered 3.6 timestamp' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'buileTime\s*:=\s*"2023/1/30 17:46:22"'
+        $ok | Should Be $true
+    }
+
+    It 'Ahk2Exe file version is 3.6' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
+        $ok | Should Be $true
+    }
+
+    It 'Ahk2Exe product version is 20' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            ';@Ahk2Exe-SetProductVersion\s+20\b'
+        $ok | Should Be $true
+    }
+}
