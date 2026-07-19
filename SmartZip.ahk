@@ -827,6 +827,9 @@ class SmartZip
         DetectHiddenWindows(1)
 
         g := Gui("+LastFound")
+        g.io := 0
+        g.ioRunning := false
+        g.errorMode := false
         DllCall("RegisterShellHookWindow", "UInt", WinExist())
         msgNum := DllCall("RegisterWindowMessage", "Str", "SHELLHOOK")
         OnMessage(msgNum, ShellMessage)
@@ -878,7 +881,11 @@ class SmartZip
 
         Close(*)
         {
-            if ProcessExist(this.pid)
+            SetTimer(GetWriteIO, 0)
+            g.ioRunning := false
+            g.errorMode := false
+            g.io := 0
+            if this.exactPid && this.pid && ProcessExist(this.pid)
                 ProcessClose(this.pid), ProcessWaitClose(this.pid)
             if this.HasOwnProp("temp")
                 this.RecycleItem(this.temp, A_LineNumber, true)
@@ -889,6 +896,8 @@ class SmartZip
 
         ButtonShowHide(GuiCtrlObj, *)
         {
+            if g.errorMode || g.ioRunning
+                return
             DetectHiddenWindows(0)
             if !ProcessExist(this.pid)
                 return
@@ -901,6 +910,13 @@ class SmartZip
 
         ButtonPause(GuiCtrlObj, Info)
         {
+            if g.errorMode && this.exactPid && this.pid && ProcessExist(this.pid)
+            {
+                SetTimer(GetWriteIO, 0)
+                g.ioRunning := false
+                ProcessClose(this.pid)
+                return
+            }
             DetectHiddenWindows(1)
             if !WinExist(sub())
                 return
@@ -942,11 +958,35 @@ class SmartZip
                 WinShow(sub())
         }
 
+        GetWriteIO()
+        {
+            if !g.errorMode || !this.exactPid || !this.query
+                return
+
+            try
+            {
+                winmgmts := ComObjGet("winmgmts:")
+                matches := []
+                for proc in winmgmts.ExecQuery(this.query)
+                    if proc.ProcessID = this.pid
+                        matches.Push(proc)
+                if matches.Length != 1
+                    return
+
+                io := Round(matches[1].WriteTransferCount / 1024 / 1024)
+                if g.io
+                    速度2.Text := Round(io - g.io) " MB/s"
+                g.io := io
+                g.ioRunning := true
+            }
+        }
+
         ShellMessage(wParam := 6, *)
         {
             ListLines(0)
             DetectHiddenWindows(1)
             static timeSave := A_TickCount
+            static times := 0
 
             if !this.isRunning
                 Close()
@@ -962,6 +1002,29 @@ class SmartZip
                     g.Title := WinGetTitle(sub())
 
                 arr := StrSplit(WinGetText(sub()), "`n")
+                if !arr.Length
+                {
+                    times++
+                    if times > 10
+                    {
+                        IsChanged(处理3, "界面出现错误,如速度有变动但仍在解压中,长时间未变动可点击强制结束防止卡住")
+                        IsChanged(暂停, "强制结束", 1)
+                        g.errorMode := true
+                        if this.exactPid && this.query
+                            SetTimer(GetWriteIO, 1000)
+                        times := 0
+                    }
+                    return
+                }
+
+                if g.errorMode || g.ioRunning
+                {
+                    SetTimer(GetWriteIO, 0)
+                    g.ioRunning := false
+                    g.errorMode := false
+                    g.io := 0
+                }
+                times := 0
                 for i in arr
                 {
                     if InStr(i, "您真的要取消吗")

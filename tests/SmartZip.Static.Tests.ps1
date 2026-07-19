@@ -383,3 +383,60 @@ Describe 'PidAndWmiSafety' {
         $script:Run7zBody | Should Not Match 'CMDPID'
     }
 }
+
+Describe 'ErrorModeStateMachine' {
+
+    It 'Gui method body can be extracted' {
+        [string]::IsNullOrEmpty($script:GuiBody) | Should Be $false
+    }
+
+    It 'Gui initializes explicit error and IO state' {
+        $script:GuiBody | Should Match 'g\.errorMode\s*:=\s*false'
+        $script:GuiBody | Should Match 'g\.ioRunning\s*:=\s*false'
+        $script:GuiBody | Should Match 'g\.io\s*:=\s*0'
+    }
+
+    It 'ShellMessage enters ErrorMode only after more than ten failures' {
+        $script:GuiBody | Should Match 'static\s+times'
+        $script:GuiBody | Should Match 'times\+\+'
+        $script:GuiBody | Should Match 'times\s*>\s*10\b'
+    }
+
+    It 'ErrorMode uses the 3.6 force-end text' {
+        $script:GuiBody | Should Match '界面出现错误'
+        $script:GuiBody | Should Match '强制结束'
+    }
+
+    It 'IO timer starts at one second behind exact PID and query gates' {
+        $script:GuiBody | Should Match 'this\.exactPid\s*&&\s*this\.query'
+        $script:GuiBody | Should Match 'SetTimer\(\s*GetWriteIO\s*,\s*1000\s*\)'
+    }
+
+    It 'normal parse recovery stops IO and clears ErrorMode' {
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)SetTimer\(\s*GetWriteIO\s*,\s*0\s*\).*?g\.ioRunning\s*:=\s*false.*?g\.errorMode\s*:=\s*false'
+        $ok | Should Be $true
+    }
+
+    It 'normal GUI speed text update remains present' {
+        $script:GuiBody | Should Match 'IsChanged\(\s*速度2\s*,'
+    }
+
+    It 'Close stops the IO timer before destroying the GUI' {
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)Close\(\*\).*?SetTimer\(\s*GetWriteIO\s*,\s*0\s*\).*?g\.Destroy\(\)'
+        $ok | Should Be $true
+    }
+
+    It 'force end requires ErrorMode and exact PID' {
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)ButtonPause\(.*?g\.errorMode\s*&&\s*this\.exactPid.*?ProcessClose\(\s*this\.pid\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'show-hide is disabled during ErrorMode or IO sampling' {
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)ButtonShowHide\(.*?if\s+g\.errorMode\s*\|\|\s*g\.ioRunning\s+return'
+        $ok | Should Be $true
+    }
+}
