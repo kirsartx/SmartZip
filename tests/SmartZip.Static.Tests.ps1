@@ -391,9 +391,10 @@ Describe 'ErrorModeStateMachine' {
     }
 
     It 'Gui initializes explicit error and IO state' {
-        $script:GuiBody | Should Match 'g\.errorMode\s*:=\s*false'
-        $script:GuiBody | Should Match 'g\.ioRunning\s*:=\s*false'
-        $script:GuiBody | Should Match 'g\.io\s*:=\s*0'
+        # Must be constructor-adjacent init, not recovery/Close clears alone.
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)g\s*:=\s*Gui\(\s*"\+LastFound"\s*\).*?g\.io\s*:=\s*0.*?g\.ioRunning\s*:=\s*false.*?g\.errorMode\s*:=\s*false.*?RegisterShellHookWindow'
+        $ok | Should Be $true
     }
 
     It 'ShellMessage enters ErrorMode only after more than ten failures' {
@@ -410,11 +411,16 @@ Describe 'ErrorModeStateMachine' {
     It 'IO timer starts at one second behind exact PID and query gates' {
         $script:GuiBody | Should Match 'this\.exactPid\s*&&\s*this\.query'
         $script:GuiBody | Should Match 'SetTimer\(\s*GetWriteIO\s*,\s*1000\s*\)'
+        # GetWriteIO body: entry gate, PID filter, unique-match rejection (source order).
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)GetWriteIO\s*\(\s*\).*?if\s*!g\.errorMode\s*\|\|\s*!this\.exactPid\s*\|\|\s*!this\.query.*?proc\.ProcessID\s*=\s*this\.pid.*?matches\.Length\s*!=\s*1'
+        $ok | Should Be $true
     }
 
     It 'normal parse recovery stops IO and clears ErrorMode' {
+        # ShellMessage recovery branch only — not satisfiable by Close(*) cleanup alone.
         $ok = Test-Regex -Text $script:GuiBody -Pattern `
-            '(?s)SetTimer\(\s*GetWriteIO\s*,\s*0\s*\).*?g\.ioRunning\s*:=\s*false.*?g\.errorMode\s*:=\s*false'
+            '(?s)if\s+g\.errorMode\s*\|\|\s*g\.ioRunning.*?SetTimer\(\s*GetWriteIO\s*,\s*0\s*\).*?g\.ioRunning\s*:=\s*false.*?g\.errorMode\s*:=\s*false.*?g\.io\s*:=\s*0.*?times\s*:=\s*0'
         $ok | Should Be $true
     }
 
@@ -429,8 +435,9 @@ Describe 'ErrorModeStateMachine' {
     }
 
     It 'force end requires ErrorMode and exact PID' {
+        # Full product gate: errorMode && exactPid && pid && ProcessExist(pid).
         $ok = Test-Regex -Text $script:GuiBody -Pattern `
-            '(?s)ButtonPause\(.*?g\.errorMode\s*&&\s*this\.exactPid.*?ProcessClose\(\s*this\.pid\s*\)'
+            '(?s)ButtonPause\(.*?g\.errorMode\s*&&\s*this\.exactPid\s*&&\s*this\.pid\s*&&\s*ProcessExist\(\s*this\.pid\s*\).*?ProcessClose\(\s*this\.pid\s*\)'
         $ok | Should Be $true
     }
 
