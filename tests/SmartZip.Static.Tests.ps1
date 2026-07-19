@@ -1,0 +1,104 @@
+#requires -Version 5.0
+<#
+.SYNOPSIS
+  Static regression tests for SmartZip.ahk correctness hotfixes (no AutoHotkey runtime).
+
+.NOTES
+  Pester 3.4.0 only — classic Should syntax (pipe form).
+  Run:
+    Invoke-Pester -Script tests/SmartZip.Static.Tests.ps1 -PassThru
+#>
+
+$ErrorActionPreference = 'Stop'
+
+if (-not $PSScriptRoot) {
+    $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+$script:SmartZipPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\SmartZip.ahk'))
+
+function Get-SmartZipSource {
+    if (-not (Test-Path -LiteralPath $script:SmartZipPath)) {
+        throw "SmartZip.ahk not found at: $script:SmartZipPath"
+    }
+    $raw = Get-Content -LiteralPath $script:SmartZipPath -Raw -Encoding UTF8
+    if ($raw -notmatch '文件文件夹混合|多个文件') {
+        $raw = Get-Content -LiteralPath $script:SmartZipPath -Raw
+    }
+    return $raw
+}
+
+function Get-SourceSlice {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$StartMarker,
+        [Parameter(Mandatory = $true)][string]$EndMarker
+    )
+    $start = $Source.IndexOf($StartMarker)
+    if ($start -lt 0) {
+        return $null
+    }
+    $from = $start
+    $end = $Source.IndexOf($EndMarker, $from + $StartMarker.Length)
+    if ($end -lt 0) {
+        return $Source.Substring($from)
+    }
+    return $Source.Substring($from, $end - $from)
+}
+
+function Test-Regex {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Pattern
+    )
+    return [bool]([regex]::IsMatch($Text, $Pattern))
+}
+
+$script:SmartZipSource = Get-SmartZipSource
+$script:UnzipBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    Unzip(loopPath" -EndMarker "`n    OpenZip()"
+$script:CreateZipBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    CreateZip()" -EndMarker "`n    Gui()"
+$script:IsArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    RunCmd("
+
+Describe 'NestingGate' {
+
+    It 'source file SmartZip.ahk exists next to tests folder' {
+        $script:SmartZipPath | Should Exist
+    }
+
+    It 'Unzip method body can be extracted' {
+        [string]::IsNullOrEmpty($script:UnzipBody) | Should Be $false
+        $script:UnzipBody | Should Match 'UnZipNesting'
+    }
+
+    It 'does not share early-continue requiring both nesting AND nestingMuilt' {
+        $hasSharedGate = Test-Regex -Text $script:UnzipBody -Pattern `
+            'if\s*!this\.nesting\s*\|\|\s*!this\.nestingMuilt\s*\r?\n\s*continue'
+        $hasSharedGate | Should Be $false
+    }
+
+    It 'does not gate single-entry nesting with OR of inverted nesting flags' {
+        $hasOrGate = Test-Regex -Text $script:UnzipBody -Pattern `
+            'if\s*!this\.nesting\s*\|\|\s*!this\.nestingMuilt'
+        $hasOrGate | Should Be $false
+    }
+
+    It 'file branch still calls UnZipNesting only when this.nesting is true' {
+        $ok = Test-Regex -Text $script:UnzipBody -Pattern `
+            '(?s)if\s*!isDir\s*\{[^}]*if\s*this\.nesting\s+UnZipNesting\s*\('
+        $ok | Should Be $true
+    }
+
+    It 'directory branch still loops UnZipNesting only when this.nestingMuilt is true' {
+        $ok = Test-Regex -Text $script:UnzipBody -Pattern `
+            '(?s)\}?\s*else if\s*this\.nestingMuilt\s+loop files[^\r\n]*\r?\n\s*UnZipNesting\s*\('
+        $ok | Should Be $true
+    }
+
+    It 'multi-file branch still has nestingMuilt loop for UnZipNesting' {
+        $ok = Test-Regex -Text $script:UnzipBody -Pattern `
+            '(?s);多个文件.*?if\s*this\.nestingMuilt\s+loop files.*?UnZipNesting\s*\('
+        $ok | Should Be $true
+    }
+}

@@ -333,9 +333,6 @@ class SmartZip
 
                 this.RecycleItem(tmpDir, A_LineNumber, true)
 
-                if !this.nesting || !this.nestingMuilt
-                    continue
-
                 if !isDir
                 {
                     if this.nesting
