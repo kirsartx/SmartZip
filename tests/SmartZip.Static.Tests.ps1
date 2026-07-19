@@ -183,3 +183,43 @@ Describe 'IsArchiveExt' {
         $ok | Should Be $true
     }
 }
+
+Describe 'SettingsUnZipKey' {
+
+    It 'smart unzip checkbox uses IsContextMenuVisible("UnZip") capital U' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'IsContextMenuVisible\(\s*"UnZip"\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'does not call IsContextMenuVisible("unZip") for smart unzip' {
+        # Pattern ends at closing quote so "unZipCP" is not a false positive.
+        $bad = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'IsContextMenuVisible\(\s*"unZip"\s*\)'
+        $bad | Should Be $false
+    }
+
+    It 'leaves openZip checkbox key as openZip' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'IsContextMenuVisible\(\s*"openZip"\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'leaves addZip checkbox key as addZip' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'IsContextMenuVisible\(\s*"addZip"\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'leaves unZipCP checkbox key as unZipCP' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'IsContextMenuVisible\(\s*"unZipCP"\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'IsContextMenuVisible still treats UnZip as file-shell key' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'if\s+what\s*=\s*"UnZip"\s*\|\|\s*what\s*=\s*"unZipCP"'
+        $ok | Should Be $true
+    }
+}
