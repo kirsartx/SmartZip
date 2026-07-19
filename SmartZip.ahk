@@ -1124,12 +1124,8 @@ class SmartZip
         if !ext
             return true
 
-        if this.ext.Has(zip)
+        if this.ext.Has(ext)
             return true
-
-        for i, n in this.ext
-            if InStr(i, ext)
-                return true
 
         for i in this.extExp
             if ext ~= "i)" i

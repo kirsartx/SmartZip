@@ -139,3 +139,47 @@ Describe 'CreateZipPathInit' {
         ($init.Index -lt $concat.Index) | Should Be $true
     }
 }
+
+Describe 'IsArchiveExt' {
+
+    It 'IsArchive method body can be extracted' {
+        [string]::IsNullOrEmpty($script:IsArchiveBody) | Should Be $false
+        $script:IsArchiveBody | Should Match 'IsArchive\s*\(\s*ext\s*\)'
+    }
+
+    It 'returns true when extension is empty' {
+        $ok = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            '(?s)if\s*!ext\s+return\s+true'
+        $ok | Should Be $true
+    }
+
+    It 'uses this.ext.Has(ext) for exact map lookup' {
+        $ok = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            'this\.ext\.Has\(\s*ext\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'does not call this.ext.Has(zip) with undefined zip' {
+        $bad = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            'this\.ext\.Has\(\s*zip\s*\)'
+        $bad | Should Be $false
+    }
+
+    It 'does not substring-match map keys via InStr(i, ext) over this.ext' {
+        $bad = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            '(?s)for\s+i\s*,\s*n\s+in\s+this\.ext\s+if\s+InStr\(\s*i\s*,\s*ext\s*\)'
+        $bad | Should Be $false
+    }
+
+    It 'still loops this.extExp with regex match on ext' {
+        $ok = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            '(?s)for\s+i\s+in\s+this\.extExp\s+if\s+ext\s*~='
+        $ok | Should Be $true
+    }
+
+    It 'still lowercases ext before checks' {
+        $ok = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            'ext\s*:=\s*StrLower\s*\(\s*ext\s*\)'
+        $ok | Should Be $true
+    }
+}
