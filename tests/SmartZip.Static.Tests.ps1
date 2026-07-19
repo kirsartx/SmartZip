@@ -323,3 +323,49 @@ Describe 'ExcludeArgsBuildAndConsume' {
         $script:OpenZipBody | Should Not Match 'this\.excludeArgs'
     }
 }
+
+Describe 'PidAndWmiSafety' {
+
+    It 'Run7z body can be extracted' {
+        [string]::IsNullOrEmpty($script:Run7zBody) | Should Be $false
+    }
+
+    It 'Run7z resets pid query and exactPid for every task' {
+        $ok = Test-Regex -Text $script:Run7zBody -Pattern `
+            '(?s)this\.pid\s*:=\s*""\s*this\.query\s*:=\s*""\s*this\.exactPid\s*:=\s*false'
+        $ok | Should Be $true
+    }
+
+    It 'WinGetPID stores a 7zG CommandLine query' {
+        $script:Run7zBody | Should Match 'this\.query\s*:='
+        $script:Run7zBody | Should Match 'Win32_Process'
+        $script:Run7zBody | Should Match 'CommandLine\s+like'
+    }
+
+    It 'product source forbids a 7zG image-name PID fallback' {
+        $bad = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'ProcessExist\(\s*["'']7zG\.exe["'']\s*\)'
+        $bad | Should Be $false
+    }
+
+    It 'WinGetPID requires exactly one WMI match' {
+        $script:Run7zBody | Should Match 'matches\.Length\s*!=\s*1'
+        $script:Run7zBody | Should Match 'this\.exactPid\s*:=\s*true'
+    }
+
+    It 'WinGetPID has a soft failure path' {
+        $script:Run7zBody | Should Match 'try'
+        $script:Run7zBody | Should Match 'this\.exactPid\s*:=\s*false'
+    }
+
+    It 'path escaping covers recovered special characters' {
+        $script:Run7zBody | Should Match 'EscapeCharacter'
+        foreach ($char in @('\[', '\]', '\^')) {
+            $script:Run7zBody | Should Match $char
+        }
+    }
+
+    It 'CMDPID code is not moved into the GUI PID binding' {
+        $script:Run7zBody | Should Not Match 'CMDPID'
+    }
+}

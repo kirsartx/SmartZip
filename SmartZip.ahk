@@ -78,7 +78,9 @@ class SmartZip
         SetWorkingDir(this.defaultDir := dir)
 
         this.continue := this.guiShow := this.cmdHide := false
-        this.pid := this.log := this.testLog := ''
+        this.pid := this.query := ""
+        this.exactPid := false
+        this.log := this.testLog := ""
 
         this.ext := Map()
         this.extExp := []
@@ -1028,6 +1030,8 @@ class SmartZip
     Run7z(is7z := false, xa := "x", path := "", args := "", hide := false, log := true, linenum := "")
     {
         this.pid := ""
+        this.query := ""
+        this.exactPid := false
         this.cmdHide := false
         if !is7z
             SetTimer(WinGetPID, 10)
@@ -1042,15 +1046,29 @@ class SmartZip
         WinGetPID()
         {
             DetectHiddenWindows(1)
-            static winmgmts := ComObjGet("winmgmts:")
+            static winmgmts := ""
 
-            WinWait("ahk_exe 7zG.exe", , 3)
-            winmgmts.ExecQuery('Select * from Win32_Process where Name="7zG.exe" and CommandLine like "%' StrReplace(path, "\", "\\") '%"')._NewEnum()(&proc)
-            if (this.pid := IsSet(proc) ? proc.ProcessID : "")
+            try
             {
+                if !winmgmts
+                    winmgmts := ComObjGet("winmgmts:")
+
+                WinWait("ahk_exe 7zG.exe", , 3)
+                this.query := 'Select * from Win32_Process where Name="7zG.exe" and CommandLine like "%' EscapeCharacter(path) '%"'
+                matches := []
+                for proc in winmgmts.ExecQuery(this.query)
+                    matches.Push(proc)
+
+                if matches.Length != 1
+                    return ClearExactPid()
+
+                this.pid := matches[1].ProcessID
+                if !this.pid
+                    return ClearExactPid()
+                this.exactPid := true
+
                 if this.to = "x" && this.excludeArgs
                 {
-
                     while (!GetSize())
                     {
                         if A_TickCount - this.now > 1000
@@ -1060,6 +1078,23 @@ class SmartZip
                         this.currentSize := size[1] * 1024 * 1024
                 }
                 SetTimer(WinGetPID, 0)
+            }
+            catch
+                ClearExactPid()
+
+            ClearExactPid()
+            {
+                this.pid := ""
+                this.query := ""
+                this.exactPid := false
+            }
+
+            EscapeCharacter(str)
+            {
+                str := StrReplace(str, "\", "\\")
+                for char in ["[", "]", "^"]
+                    str := StrReplace(str, char, "_")
+                return str
             }
 
             GetSize()
