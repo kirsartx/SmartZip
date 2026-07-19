@@ -60,6 +60,14 @@ $script:CreateZipBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    CreateZip()" -EndMarker "`n    Gui()"
 $script:IsArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    RunCmd("
+$script:InitBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    Init(argsArr)" -EndMarker "`n    Exec("
+$script:OpenZipBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    OpenZip()" -EndMarker "`n    CreateZip()"
+$script:GuiBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    Gui()" -EndMarker "`n    Run7z("
+$script:Run7zBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    Run7z(" -EndMarker "`n    RecycleItem("
 
 Describe 'NestingGate' {
 
@@ -254,5 +262,64 @@ Describe 'VersionBanner' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             ';@Ahk2Exe-SetProductVersion\s+20\b'
         $ok | Should Be $true
+    }
+}
+
+Describe 'ExcludeArgsBuildAndConsume' {
+
+    It 'Init method body can be extracted' {
+        [string]::IsNullOrEmpty($script:InitBody) | Should Be $false
+    }
+
+    It 'Init reads both exclude lists' {
+        $script:InitBody | Should Match 'ReadLoop\(\s*"excludeExt"'
+        $script:InitBody | Should Match 'ReadLoop\(\s*"excludeName"'
+    }
+
+    It 'Init builds extension and name switches' {
+        $script:InitBody | Should Match "this\.excludeArgs\s*\.=\s*'\s*-x!\*\.'\s*i"
+        $script:InitBody | Should Match "this\.excludeArgs\s*\.=\s*'\s*-x!\*'\s*i\s*'\*'"
+    }
+
+    It 'Init appends recursion only when excludeArgs is non-empty' {
+        $ok = Test-Regex -Text $script:InitBody -Pattern `
+            '(?s)if\s+this\.excludeArgs\s+this\.excludeArgs\s*\.=\s*"\s*-r"'
+        $ok | Should Be $true
+    }
+
+    It 'Unzip no longer builds excludeArgs locally' {
+        $script:UnzipBody | Should Not Match 'ReadLoop\(\s*"excludeExt"'
+        $script:UnzipBody | Should Not Match 'ReadLoop\(\s*"excludeName"'
+        $script:UnzipBody | Should Not Match 'this\.excludeArgs\s*:='
+    }
+
+    It 'Unzip still consumes excludeArgs on both extraction paths' {
+        $matches = [regex]::Matches(
+            $script:UnzipBody,
+            '(?m)this\.Run7z\([^\r\n]*''x''[^\r\n]*this\.excludeArgs'
+        )
+        ($matches.Count -ge 2) | Should Be $true
+    }
+
+    It 'CreateZip all-folder branch appends excludeArgs' {
+        $m = [regex]::Match(
+            $script:CreateZipBody,
+            '(?s)if\s+count\s*=\s*this\.arr\.Length(.*?)(?:else if\s+this\.arr\.Length\s*=\s*1)'
+        )
+        $m.Success | Should Be $true
+        $m.Groups[1].Value | Should Match "args\s*'\s*""'\s*i\s*'\\\*""'\s*this\.excludeArgs"
+    }
+
+    It 'CreateZip single and mixed branches do not append excludeArgs' {
+        $singleAndMixed = [regex]::Match(
+            $script:CreateZipBody,
+            '(?s)else if\s+this\.arr\.Length\s*=\s*1(.*?)(?:IsHide\()'
+        )
+        $singleAndMixed.Success | Should Be $true
+        $singleAndMixed.Groups[1].Value | Should Not Match 'this\.excludeArgs'
+    }
+
+    It 'OpenZip aggregate compression does not consume excludeArgs' {
+        $script:OpenZipBody | Should Not Match 'this\.excludeArgs'
     }
 }

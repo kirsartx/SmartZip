@@ -86,6 +86,18 @@ class SmartZip
         ini.ReadLoop("ext", this.ext, true)
         ini.ReadLoop("extExp", this.extExp)
 
+        excludeExt := []
+        ini.ReadLoop("excludeExt", excludeExt)
+        excludeName := []
+        ini.ReadLoop("excludeName", excludeName)
+        this.excludeArgs := ""
+        for i in excludeExt
+            this.excludeArgs .= ' -x!*.' i
+        for i in excludeName
+            this.excludeArgs .= ' -x!*' i '*'
+        if this.excludeArgs
+            this.excludeArgs .= " -r"
+
         this.logLevel := ini.logLevel
 
         this.cmdLog := ini.cmdLog
@@ -228,21 +240,6 @@ class SmartZip
             this.password := ["", ini.lastPass, FormatPassword(A_Clipboard)]
 
             ini.ReadLoop("password", this.password)
-
-            excludeExt := []
-            ini.ReadLoop("excludeExt", excludeExt)
-            excludeName := []
-            ini.ReadLoop("excludeName", excludeName)
-            this.excludeArgs := ""
-            if excludeExt.Length || excludeName.Length
-            {
-                for i in excludeExt
-                    this.excludeArgs .= ' -x!*.' i
-                for i in excludeName
-                    this.excludeArgs .= ' -x!*' i '*'
-            }
-            if this.excludeArgs
-                this.excludeArgs .= " -r"
 
             if this.dynamicPassSort || this.autoAddPass
             {
@@ -780,7 +777,7 @@ class SmartZip
                 zipName := this.AUO(RegExReplace(i, ".*\\"), ext)
                 this.temp := zipName ext
                 this.index := A_Index
-                this.Run7z(hideBool, 'a', zipName, args ' "' i '\*"', hideBool || count > 1, , A_LineNumber)
+                this.Run7z(hideBool, 'a', zipName, args ' "' i '\*"' this.excludeArgs, hideBool || count > 1, , A_LineNumber)
 
             }
             return
