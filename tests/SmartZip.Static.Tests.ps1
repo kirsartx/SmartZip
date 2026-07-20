@@ -527,3 +527,102 @@ Describe 'ErrorModeStateMachine' {
         $ok | Should Be $true
     }
 }
+
+$script:RunCmdBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    RunCmd(CmdLine" -EndMarker "`n    CheckCMD("
+$script:RunCmdCaptureBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    RunCmdCapture(" -EndMarker "`n    RunCmd(CmdLine"
+
+Describe 'RunCmdCaptureSafety' {
+
+    It 'RunCmdCapture method exists before RunCmd' {
+        [string]::IsNullOrEmpty($script:RunCmdCaptureBody) | Should Be $false
+        $script:RunCmdCaptureBody | Should Match 'RunCmdCapture\s*\('
+    }
+
+    It 'RunCmdCapture default codePage is UTF-8' {
+        $ok = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'RunCmdCapture\s*\(\s*CmdLine\s*,\s*Codepage\s*:=\s*"UTF-8"\s*\)'
+        if (-not $ok) {
+            $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+                'RunCmdCapture\s*\(\s*\w+\s*,\s*\w+\s*:=\s*"UTF-8"\s*\)'
+        }
+        $ok | Should Be $true
+    }
+
+    It 'RunCmdCapture returns exitCode output and cancelled properties' {
+        $ok = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'exitCode'
+        $ok2 = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'output'
+        $ok3 = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'cancelled'
+        ($ok -and $ok2 -and $ok3) | Should Be $true
+    }
+
+    It 'RunCmdCapture obtains a real exit code via GetExitCodeProcess' {
+        $ok = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'GetExitCodeProcess'
+        $ok | Should Be $true
+    }
+
+    It 'RunCmdCapture wires both hStdOutput and hStdError to the pipe' {
+        $okOut = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'hStdOutput|hPipeW'
+        $okErr = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'hStdError|hPipeW'
+        # Require two NumPut calls that assign the write pipe (stdout + stderr)
+        $puts = [regex]::Matches($script:RunCmdCaptureBody, 'NumPut\(\s*"Ptr"\s*,\s*hPipeW')
+        ($puts.Count -ge 2) | Should Be $true
+    }
+
+    It 'RunCmdCapture does not ProcessClose on keyword matchers' {
+        $hasClose = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'ProcessClose\s*\('
+        $hasClose | Should Be $false
+    }
+
+    It 'RunCmdCapture does not invoke CheckCMD maps during capture' {
+        $ok = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'CheckCMD\s*\('
+        $ok | Should Be $false
+    }
+
+    It 'RunCmdCapture marks cancelled when exitCode is 255' {
+        $ok = Test-Regex -Text $script:RunCmdCaptureBody -Pattern `
+            'cancelled\s*:=\s*.*255|255.*cancelled'
+        $ok | Should Be $true
+    }
+
+    It 'legacy RunCmd method body still exists for compatibility' {
+        [string]::IsNullOrEmpty($script:RunCmdBody) | Should Be $false
+        $script:RunCmdBody | Should Match 'CreateProcess'
+    }
+
+    It 'legacy CheckCMD still early-closes only on its own path' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            '(?s)CheckCMD\(.*?LogAndReturn.*?ProcessClose\(\s*this\.CMDPID\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'Run7z still launches 7zG for non-CLI GUI extract' {
+        $ok = Test-Regex -Text $script:Run7zBody -Pattern `
+            'this\.7zG'
+        $ok | Should Be $true
+        $ok2 = Test-Regex -Text $script:Run7zBody -Pattern `
+            'is7z\s*\?\s*this\.7z\s*:\s*this\.7zG'
+        $ok2 | Should Be $true
+    }
+
+    It 'Run7z still resets exactPid bind state per task' {
+        $ok = Test-Regex -Text $script:Run7zBody -Pattern `
+            'this\.exactPid\s*:=\s*false'
+        $ok | Should Be $true
+    }
+
+    It 'product source still forbids 7zG image-name PID fallback' {
+        $bad = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'ProcessExist\(\s*["'']7zG\.exe["'']\s*\)'
+        $bad | Should Be $false
+    }
+}
