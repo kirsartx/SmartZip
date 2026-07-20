@@ -203,7 +203,6 @@ Describe 'ArchiveDiagnosticsVolumes' {
         'part10_rar_missing_includes_part09',
         'part10_rar_missing_excludes_present_first',
         'part10_rar_missing_excludes_selected',
-        'part10_rar_missing_excludes_part11',
         'rar_base_is_volume',
         'rar_base_selected_is_first',
         'rar_base_first_path',
@@ -237,46 +236,49 @@ Describe 'ArchiveDiagnosticsVolumes' {
         'orphan_r00_not_first',
         'orphan_r00_derives_rar_first',
         'orphan_r00_missing_base_rar',
-        'orphan_r00_does_not_fabricate_r99',
-        'absent_selected_is_volume',
-        'absent_selected_first_path',
-        'absent_selected_member_count',
-        'absent_selected_member_only_present',
-        'absent_selected_not_member',
-        'absent_selected_listed_missing',
-        'present_first_sibling_casing_is_volume',
-        'present_first_sibling_casing',
-        'numeric_000_not_volume',
-        'numeric_000_empty_first',
-        'numeric_000_empty_members',
-        'numeric_000_empty_missing',
-        'numeric_000_selected_not_first',
-        'numeric_7z_000_not_volume',
-        'numeric_7z_000_empty_first',
-        'numeric_7z_000_empty_members',
-        'numeric_7z_000_empty_missing',
-        'numeric_7z_000_selected_not_first',
-        'part00_not_volume',
-        'part00_empty_first',
-        'part00_empty_members',
-        'part00_empty_missing',
-        'part00_selected_not_first',
-        'large_suffix_is_volume',
-        'large_suffix_empty_missing',
-        'large_suffix_retains_members',
-        'large_suffix_retains_001',
-        'large_suffix_retains_5000',
-        'invalid_sibling_zero_is_volume',
-        'invalid_sibling_zero_ignored',
-        'invalid_sibling_zero_not_member',
-        'invalid_sibling_zero_keeps_001',
-        'invalid_sibling_zero_keeps_002'
+        'orphan_r00_does_not_fabricate_r99'
     )
+
+    # Keep the canonical 67 volume Its while folding follow-up coverage into them.
+    $extraCases = @{
+        'part10_rar_reports_gap_missing_count' = @('part10_rar_missing_excludes_part11')
+        'missing_first_still_volume' = @(
+            'absent_selected_is_volume', 'absent_selected_first_path',
+            'absent_selected_member_count', 'absent_selected_member_only_present',
+            'absent_selected_not_member', 'absent_selected_listed_missing'
+        )
+        'sevenz_002_is_volume' = @(
+            'present_first_sibling_casing_is_volume', 'present_first_sibling_casing'
+        )
+        'non_volume_is_false' = @(
+            'numeric_000_not_volume', 'numeric_000_empty_first', 'numeric_000_empty_members',
+            'numeric_000_empty_missing', 'numeric_000_selected_not_first',
+            'numeric_7z_000_not_volume', 'numeric_7z_000_empty_first', 'numeric_7z_000_empty_members',
+            'numeric_7z_000_empty_missing', 'numeric_7z_000_selected_not_first',
+            'part00_not_volume', 'part00_empty_first', 'part00_empty_members',
+            'part00_empty_missing', 'part00_selected_not_first'
+        )
+        'solo_001_is_volume' = @(
+            'large_suffix_is_volume', 'large_suffix_empty_missing', 'large_suffix_retains_members',
+            'large_suffix_retains_001', 'large_suffix_retains_5000'
+        )
+        'missing_middle_is_volume' = @(
+            'invalid_sibling_zero_is_volume', 'invalid_sibling_zero_ignored',
+            'invalid_sibling_zero_not_member', 'invalid_sibling_zero_keeps_001',
+            'invalid_sibling_zero_keeps_002'
+        )
+    }
 
     foreach ($name in $volumeCases) {
         It "volume case $name PASS" {
             $script:VolResults.ContainsKey($name) | Should Be $true
             $script:VolResults[$name] | Should Be 'PASS'
+            if ($extraCases.ContainsKey($name)) {
+                foreach ($extraName in $extraCases[$name]) {
+                    $script:VolResults.ContainsKey($extraName) | Should Be $true
+                    $script:VolResults[$extraName] | Should Be 'PASS'
+                }
+            }
         }
     }
 }
