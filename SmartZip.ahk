@@ -5,11 +5,11 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6
-;@Ahk2Exe-SetProductVersion 21
+;@Ahk2Exe-SetProductVersion 22
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 21
+buildVersion := 22
 MainVersion := "3.6"
-edition := "Kirs.1"
+edition := "Kirs.2"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
 buileTime := "2026/7/20 12:56:47"
 app := "SmartZip"
@@ -30,6 +30,8 @@ if A_Args.Length
 else
     Setting
 
+#Include lib\ArchiveDiagnostics.ahk
+#Include *i tests\IntegrationTestHook.ahk
 class SmartZip
 {
     __New(sevenZipDir)
@@ -219,6 +221,11 @@ class SmartZip
 
     Unzip(loopPath := "")
     {
+        isBatch := this.muilt
+        if !loopPath
+            this.processedVolumeFirst := Map()
+        if (!loopPath && isBatch)
+            this.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
         if !loopPath
         {
             arr := this.arr
@@ -230,7 +237,6 @@ class SmartZip
             this.delWhenHasPass := ini.delWhenHasPass
             this.nesting := ini.nesting
             this.nestingMuilt := ini.nestingMuilt
-            this.succesSpercent := ini.successPercent
             this.autoRemovePass := ini.autoRemovePass
             if (targetDir := ini.targetDir)
                 targetDir := targetDir ~= "i)^[a-z]:\\$" ? targetDir : RTrim(targetDir, "\")
@@ -240,7 +246,7 @@ class SmartZip
             if targetDir && DirExist(targetDir)
                 SetWorkingDir(this.defaultDir := targetDir)
 
-            this.password := ["", ini.lastPass, FormatPassword(A_Clipboard)]
+            this.password := ["", ini.lastPass, this.FormatPassword(A_Clipboard)]
 
             ini.ReadLoop("password", this.password)
 
@@ -355,6 +361,9 @@ class SmartZip
         if loopPath
             return
 
+        if (!loopPath && isBatch)
+            this.ShowBatchDiagnosticSummary()
+
         if this.autoRemovePass && (this.dynamicPassSort || this.autoAddPass)
         {
             if this.dynamicPassSort
@@ -375,224 +384,138 @@ class SmartZip
             if this.logLevel
                 this.log .= '`n#####`n' path '`n'
 
-            pass := ""
             this.continue := false
+            this.error := true
 
-            for i in this.password
-            {
-                if A_Index = 1
-                {
-                    this.isFile := this.isCmdReturn := false
-                    this.needPass := 4
-                    cmdArgs := this.7z ' l -slt -bsp1  "' path '"'
-                    if this.cmdLog
-                        this.testLog .= '`n#####`n' cmdArgs '`n'
-                    this.RunCmd(cmdArgs, , CheckEncrypted)
-
-                    switch this.needPass
-                    {
-                        case 0: break
-                        case 1: continue
-                        case 2:
-                        {
-                            for n in this.password
-                            {
-                                if n
-                                {
-                                    this.isFile := this.isCmdReturn := false
-                                    this.needPass := 5
-                                    cmdArgs := this.7z ' l -slt -bsp1 -p"' n '" "' path '"'
-                                    this.RunCmd(cmdArgs, , CheckEncrypted)
-                                    if this.cmdLog
-                                        this.testLog .= '`n#####`n' cmdArgs '`n'
-                                    if this.needPass = 1
-                                    {
-                                        this.error := 0
-                                        pass := ' -p"' AddPass(n) '"'
-                                        break 2
-                                    }
-                                }
-                            }
-                        }
-                        case 3: return
-                    }
-                }
-
-                this.CheckCMD(, this.7z ' t -bsp1 "' path '" -p"' i '"')
-
-                if this.continue
+            SplitPath(path, &selectedName, &selectedDir)
+            siblingNames := []
+            loop files selectedDir "\*.*", "F"
+                siblingNames.Push(A_LoopFileName)
+            volume := DetectVolumeGroup(path, siblingNames)
+            if volume.isVolume {
+                key := StrLower(volume.firstPath)
+                if !this.HasOwnProp("processedVolumeFirst")
+                    this.processedVolumeFirst := Map()
+                if this.processedVolumeFirst.Has(key) {
+                    this.error := false  ; intentional duplicate member skip, not an extraction failure
+                    skipResult := ArchiveResult(ArchiveStatus.OK, "probe", 0, path)
+                    skipResult.batchBucket := "skipped"
+                    this.ShowDiagnostic(skipResult, isBatch)
                     return
-
-                if !this.error
-                {
-                    if i
-                        pass := ' -p"' AddPass(i) '"'
-                    break
                 }
+                if (volume.missingVolumes.Length || !FileExist(volume.firstPath)) {
+                    missing := ArchiveResult(ArchiveStatus.MISSING_VOLUME, "probe", 2, path)
+                    missing.volumeFirst := volume.firstPath
+                    missing.missingVolumes := volume.missingVolumes
+                    this.ShowDiagnostic(missing, isBatch)
+                    return
+                }
+                this.processedVolumeFirst[key] := true
+                path := volume.firstPath
             }
 
-            if !this.needPass || !this.error	;密码正确或无需密码
-            {
-                this.Run7z(hideBool, 'x', path, '" -aou -o' tmpDir pass this.excludeArgs this.codePage, hideBool || this.guiShow, () => IsSuccess(), A_LineNumber)
+            probe := this.ProbeArchive(path)
+            if volume.isVolume
+                probe.volumeFirst := volume.firstPath
+            if this.logLevel
+                this.Loging("probe status=" probe.status " exit=" probe.exitCode, A_LineNumber, 4)
 
-                if IsSuccess()
-                {
-                    if part != -1
-                        return
-                    if loopPath
-                        this.RecycleItem(path, A_LineNumber, true)
-                    else if this.delSource || (pass && this.delWhenHasPass)
-                        this.RecycleItem(path, A_LineNumber)
-                }
-            } else
-            {
-                this.tryPasssword := ""
-                if this.autoAddPass
-                    SetTimer(TrackPass, 10)
-                this.Run7z(false, 'x', path, '" -aou -o' tmpDir this.excludeArgs this.codePage, , () => IsSuccess(), A_LineNumber)
-                SetTimer(TrackPass, 0), ToolTip()
+            resolved := this.ResolveArchivePassword(path, probe)
+            if this.logLevel
+                this.Loging("resolve status=" resolved.status " exit=" resolved.exitCode, A_LineNumber, 4)
 
-                if this.tryPasssword && this.exitCode != 255
-                {
+            ; Non-success preflight: never delete source; skip extract (Task 5 owns partial dirs)
+            if (resolved.status != ArchiveStatus.OK && resolved.status != ArchiveStatus.OK_WITH_WARNING) {
+                this.error := true
+                if (resolved.status = ArchiveStatus.CANCELLED)
+                    this.exitCode := 255
+                this.ShowDiagnostic(resolved, isBatch)
+                return
+            }
+
+            this.error := false
+
+            ; test=0 still forces a full integrity test before configured source handling
+            mayHandleSource := (!loopPath) && !volume.isVolume
+                && (this.delSource || (resolved.passwordUsed != "" && this.delWhenHasPass))
+            nestedMayRecycle := loopPath && !volume.isVolume
+                && (resolved.status = ArchiveStatus.OK)
+            forceTest := this.test || mayHandleSource || nestedMayRecycle
+            if (forceTest) {
+                tr := this.TestArchive(path, resolved.passwordUsed)
+                if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
+                    mayHandleSource := false
+                    nestedMayRecycle := false
+                } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
+                    ; Still extract so FinalizeExtraction can isolate salvageable partial output.
                     this.error := true
-                    this.CheckCMD(, this.7z ' t -bsp1 "' path '" -p"' this.tryPasssword '"')
-                    if !this.error
-                        AddPass(this.tryPasssword)
-                }
-
-                if IsSuccess() && part = -1 && this.delWhenHasPass
-                    this.RecycleItem(path, A_LineNumber)	;密码错误需手动输入密码
-            }
-
-            TrackPass()
-            {
-                title := "ahk_pid " this.pid
-                if WinExist(title) && WinActive(title)
-                {
-                    try
-                        if InStr(ControlGetText("Button1", title), "&S")
-                        {
-                            if !ControlGetChecked("Button1", title)
-                                return (this.tryPasssword := "", ToolTip())
-                        } else if !ControlGetText("Static14", title)
-                            return (SetTimer(TrackPass, 0), ToolTip())
-
-                    try
-                        if (str := ControlGetText("Edit1", title))
-                            this.tryPasssword := str
-
-                    try
-                        if ControlGetText("Static14", title)
-                            this.tryPasssword := ""
-
-                    if this.tryPasssword
-                        ToolTip "当前密码 : " this.tryPasssword
-                } else
-                    ToolTip()
-            }
-
-            AddPass(pass)
-            {
-                static notLoopPass := ""	;用以确保嵌套和源文件同密码时不会重复记录
-
-                if !pass
+                    mayHandleSource := false
+                    nestedMayRecycle := false
+                } else if (tr.status != ArchiveStatus.OK) {
+                    this.error := true
+                    if (tr.status = ArchiveStatus.CANCELLED)
+                        this.exitCode := 255
+                    this.ShowDiagnostic(tr, isBatch)
                     return
-
-                if !loopPath
-                    notLoopPass := pass
-                else if pass = notLoopPass
-                    return pass
-
-                if ini.lastPass != pass
-                    ini.Write(pass, "lastPass", "temp")
-
-                if this.dynamicPassSort || this.autoAddPass
-                {
-                    if !this.passwordMap.Has(pass) && this.password.Length > 2 && this.password[3] = pass
-                        return pass
-
-                    if !this.passwordMap.Has(pass)
-                    {
-                        this.dynamicPassArr.Push([pass, 0]), this.passwordMap[pass] := this.dynamicPassArr.Length
-                        if this.autoAddPass
-                            ini.Write(pass, this.passwordMap.Count, "password")
-                    } else
-                        this.dynamicPassArr[this.passwordMap[pass]][2]++
-                }
-                return pass
-            }
-
-            CheckEncrypted(LineNum, Line)
-            {
-                if this.isCmdReturn
-                    return
-
-                if this.cmdLog
-                    this.testLog .= "[" LineNum "] " line '`n'
-
-                if !this.isFile && InStr(Line, "Attributes = A") || Line ~= "CRC = [A-Z0-9]+"
-                    this.isFile := true
-                else if this.isFile && InStr(Line, "Attributes = D") || Line ~= "CRC = *?$"
-                    this.isFile := false
-                else if this.isFile && InStr(Line, "Encrypted = -")
-                    LogAndReturn(0, A_LineNumber)
-
-                else if InStr(Line, "Encrypted = +") || InStr(Line, "Wrong password?")
-                    LogAndReturn(1, A_LineNumber)
-                else if InStr(Line, "Enter password (will not be echoed):")
-                    LogAndReturn(2, A_LineNumber)
-                else if this.needPass = 5 && InStr(Line, "Errors: 1")
-                    LogAndReturn(2, A_LineNumber)
-                else if InStr(Line, "Errors: 1") || InStr(Line, "Cannot open the file as archive") || InStr(Line, "Unexpected end of archive")
-                    this.continue := true, LogAndReturn(3, A_LineNumber)
-
-                LogAndReturn(num := "", logLineNum := "")
-                {
-                    this.isCmdReturn := true
-                    this.needPass := num
-                    ProcessClose(this.CMDPID), ProcessWaitClose(this.CMDPID)
-                    this.CMDPID := 0
-                    this.Loging(cmdArgs '`n[' LineNum '] ' line, logLineNum, this.needPass > 2 ? 3 : 4)
                 }
             }
 
-            IsSuccess()
-            {
-                if !this.exitCode
-                    return true
+            extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
 
-                if !DirExist(tmpDir)
-                    return false
-
-                if this.exitCode != 255
-                {
-                    folderSize := this.fileSystemObject.GetFolder(tmpDir).Size
-                    this.Loging("文件大小: " this.currentSize " 临时文件夹大小: " folderSize, A_LineNumber)
-
-                    if folderSize >= this.currentSize
-                        return true
-                    else if folderSize / this.currentSize * 100 > this.succesSpercent
-                        return true
-                }
-
-                this.RecycleItem(tmpDir, A_LineNumber, true)
-                return false
+            ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
+            mayDel := false
+            if (resolved.status = ArchiveStatus.OK
+                && extractResult.status = ArchiveStatus.OK
+                && extractResult.exitCode = 0
+                && !volume.isVolume) {
+                if (loopPath)
+                    mayDel := false  ; nested handled below
+                else if mayHandleSource
+                    mayDel := true
             }
+
+            extractResult := this.FinalizeExtraction(path, extractResult, tmpDir, A_WorkingDir, mayDel)
+
+            ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
+            if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
+                this.RecycleItem(path, A_LineNumber, false)
+
+            this.ShowDiagnostic(extractResult, isBatch)
         }
 
-        ;解压嵌套
+        ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
         UnZipNesting(path, ext)
         {
-            if !this.IsArchive(ext) || !(part := IsPart(path))
+            if !this.IsNestedArchiveCandidate(path, ext)
                 return
 
-            timeSave := FileGetTime(path), sizeSave := FileGetSize(path)
+            SplitPath(path, &name, &dir)
+            siblingNames := []
+            if DirExist(dir) {
+                loop files dir "\*.*", "F"
+                    siblingNames.Push(A_LoopFileName)
+            }
+            vol := DetectVolumeGroup(path, siblingNames)
+            if (vol.isVolume && !vol.selectedIsFirst)
+                return  ; never re-enter non-first volumes; volumes never deleted here
+
+            probe := this.ProbeArchive(path)
+            switch probe.status
+            {
+                case ArchiveStatus.OK, ArchiveStatus.OK_WITH_WARNING
+                    , ArchiveStatus.NEED_PASSWORD, ArchiveStatus.WRONG_PASSWORD:
+                {
+                    ; real/possible archive → nested Unzip (password + extract owned by zipx)
+                }
+                default:
+                    return  ; candidate hint only; ProbeArchive rejected nested extract
+            }
+
             this.exitCode := -1
             this.Unzip(path)
             this.Loging("解压嵌套 <--> " path, A_LineNumber)
-
-            if !this.exitCode && part = -1 && FileExist(path) && FileGetTime(path) = timeSave && FileGetSize(path) = sizeSave	;!exitCode &&
-                this.RecycleItem(path, A_LineNumber)
+            ; Nested source recycle only after nested clean OK — Task 5 zipx.
+            ; Never handle it here on warning/failure/volume, and never permanently delete a source.
         }
 
         ; 解压后处理
@@ -712,8 +635,6 @@ class SmartZip
             else
                 ini.Write(, index, "password"), ini.Write(, index, "passwordSort")
         }
-
-        FormatPassword(str) => StrLen(str) < 100 ? Trim(RegExReplace(str, "(\R*)")) : ""	;移除所有换行符及首尾所有空格或制表符
     }
 
     OpenZip()
@@ -1260,7 +1181,7 @@ class SmartZip
         ext := StrLower(ext)
 
         if !ext
-            return true
+            return false
 
         if this.ext.Has(ext)
             return true
@@ -1270,6 +1191,682 @@ class SmartZip
                 return true
 
         return false
+    }
+
+    IsNestedArchiveCandidate(path, ext)
+    {
+        if this.IsArchive(ext)
+            return true
+
+        SplitPath(path, &name, &dir)
+        siblingNames := []
+        if DirExist(dir) {
+            loop files dir "\*.*", "F"
+                siblingNames.Push(A_LoopFileName)
+        }
+        g := DetectVolumeGroup(path, siblingNames)
+        return g.isVolume
+    }
+
+    ProbeArchive(path) {
+        ; Always pass empty -p so 7-Zip ZS does not block on encrypted-header password prompts
+        ; when RunCmdCapture has no stdin (CREATE_NO_WINDOW). Matches TestArchive empty-password shape.
+        cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' path '"'
+        if this.cmdLog
+            this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+        cap := this.RunCmdCapture(cmd, "UTF-8")
+        return Classify7zResult("probe", cap.exitCode, cap.output, path)
+    }
+
+    TestArchive(path, password := "") {
+        cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
+        if this.cmdLog
+            this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+        cap := this.RunCmdCapture(cmd, "UTF-8")
+        result := Classify7zResult("test", cap.exitCode, cap.output, path)
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+            result.passwordUsed := password
+        return result
+    }
+
+    BuildPasswordCandidates(path) {
+        out := []
+        seen := Map()
+        add(p) {
+            if (p = "")
+                return
+            key := (p = "") ? "__EMPTY__" : String(p)
+            if seen.Has(key)
+                return
+            seen[key] := true
+            out.Push(p)
+        }
+        ; Prefer instance lastPass when present (harness host); production uses ini.lastPass.
+        lastPass := this.HasOwnProp("lastPass") ? this.lastPass : ini.lastPass
+        if (lastPass != "")
+            add(lastPass)
+        clip := this.FormatPassword(this.GetClipboardText())
+        if (clip != "")
+            add(clip)
+        if (this.dynamicPassSort || this.autoAddPass) {
+            arr := []
+            if this.HasProp("dynamicPassArr") {
+                for item in this.dynamicPassArr {
+                    if (item is Array)
+                        arr.Push([item[1], item[2]])
+                    else
+                        arr.Push([item, 0])
+                }
+            }
+            ; sort copy by usage count desc; do not reorder this.dynamicPassArr here (PasswordSort still owns persistence)
+            i := 0
+            while (++i <= arr.Length) {
+                j := 0
+                while (++j <= arr.Length - i) {
+                    if arr[j][2] < arr[j + 1][2] {
+                        tmp := arr[j]
+                        arr[j] := arr[j + 1]
+                        arr[j + 1] := tmp
+                    }
+                }
+            }
+            for item in arr
+                add(item[1])
+        } else if this.HasProp("password") {
+            for p in this.password
+                add(p)
+        }
+        if this.addDir2Pass {
+            SplitPath(path, , &dir)
+            ; Normalize doubled separators (AHK v2 "C:\\a\\b" literals) then take leaf folder name.
+            dir := RTrim(RegExReplace(dir, "\\+", "\"), "\")
+            parent := RegExReplace(dir, ".+\\")
+            if (parent != "")
+                add(parent)
+        }
+        return out
+    }
+
+    ResolveArchivePassword(path, probeResult) {
+        st := probeResult.status
+        if (st != ArchiveStatus.NEED_PASSWORD && st != ArchiveStatus.WRONG_PASSWORD)
+            return probeResult
+
+        emptyTry := this.TestArchive(path, "")
+        if (emptyTry.status = ArchiveStatus.OK || emptyTry.status = ArchiveStatus.OK_WITH_WARNING)
+            return emptyTry
+        if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD)
+            return emptyTry
+
+        for pwd in this.BuildPasswordCandidates(path) {
+            r := this.TestArchive(path, pwd)
+            if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING)
+                return r
+            if (r.status = ArchiveStatus.CANCELLED)
+                return r
+            if (r.status != ArchiveStatus.NEED_PASSWORD && r.status != ArchiveStatus.WRONG_PASSWORD)
+                return r	; non-password status: stop iterating
+        }
+
+        dlg := this.ShowPasswordDialog(path)
+        if (dlg.action = "cancel" || dlg.password = "")
+            return ArchiveResult(ArchiveStatus.CANCELLED, "password", -1, path, "")
+
+        r := this.TestArchive(path, dlg.password)
+        if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
+            if (dlg.action = "save")
+                this.RememberPassword(dlg.password)
+            ; "本次使用" does not persist
+            return r
+        }
+        if (r.status = ArchiveStatus.NEED_PASSWORD || r.status = ArchiveStatus.WRONG_PASSWORD)
+            return r  ; submitted-but-wrong stays diagnosable; only explicit cancel is CANCELLED
+        return r
+    }
+
+    ShowPasswordDialog(path) {
+        if IsSet(SmartZipTest_PasswordDialog)
+            return SmartZipTest_PasswordDialog(path)
+        result := { action: "cancel", password: "" }
+        SplitPath(path, &name)
+        g := Gui("+AlwaysOnTop -MinimizeBox", "SmartZip 需要密码")
+        g.AddText("w280", "文件: " name)
+        g.AddText("w280", "请输入密码:")
+        edit := g.AddEdit("w280 Password")
+        btnRow := g.AddButton("w90 Default", "本次使用")
+        btnSave := g.AddButton("x+8 w90", "使用并保存")
+        btnCancel := g.AddButton("x+8 w90", "取消")
+        btnRow.OnEvent("Click", (*) => (result.action := "use", result.password := edit.Value, g.Destroy()))
+        btnSave.OnEvent("Click", (*) => (result.action := "save", result.password := edit.Value, g.Destroy()))
+        btnCancel.OnEvent("Click", (*) => (result.action := "cancel", result.password := "", g.Destroy()))
+        g.OnEvent("Close", (*) => (result.action := "cancel", result.password := "", g.Destroy()))
+        g.Show("AutoSize Center")
+        WinWaitClose(g.Hwnd)
+        return result
+    }
+
+    RememberPassword(password) {
+        if !password
+            return password
+        if ini.lastPass != password
+            ini.Write(password, "lastPass", "temp")
+        if this.dynamicPassSort || this.autoAddPass {
+            if !this.HasProp("passwordMap")
+                this.passwordMap := Map()
+            if !this.HasProp("dynamicPassArr")
+                this.dynamicPassArr := []
+            if !this.passwordMap.Has(password) {
+                this.dynamicPassArr.Push([password, 0])
+                this.passwordMap[password] := this.dynamicPassArr.Length
+                if this.autoAddPass
+                    ini.Write(password, this.passwordMap.Count, "password")
+            } else
+                this.dynamicPassArr[this.passwordMap[password]][2]++
+        }
+        return password
+    }
+
+    FormatPassword(str) => StrLen(str) < 100 ? Trim(RegExReplace(str, "(\R*)")) : ""
+
+    GetClipboardText() => this.HasOwnProp("clipText") ? this.clipText : A_Clipboard
+
+    ExtractArchiveToTemp(path, password, tempDir) {
+        pass := ""
+        if (password != "")
+            pass := ' -p"' password '"'
+        hideBool := false
+        try hideBool := FileGetSize(path) / 1024 / 1024 < this.hideRunSize
+        catch
+            hideBool := false
+
+        this.Run7z(hideBool, 'x', path, '" -aou -o' tempDir pass this.excludeArgs this.codePage,
+            hideBool || this.guiShow, true, A_LineNumber)
+
+        extractExit := this.exitCode
+        result := ""
+        if (extractExit = 255) {
+            result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, path)
+        } else {
+            ; Always re-test with capture: 7-Zip ZS may return exit 0 with trailing-data
+            ; WARNINGS, and non-zero exits need full output for DATA_CORRUPT / etc.
+            cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
+            cap := this.RunCmdCapture(cmd, "UTF-8")
+            if this.cmdLog
+                this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+            result := Classify7zResult("extract", extractExit, cap.output, path)
+            result.exitCode := extractExit
+        }
+        result.tempOutputDir := tempDir
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+            result.passwordUsed := password
+        result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
+        result.mayDeleteSource := result.isCleanSuccess
+        return result
+    }
+
+    FinalizeExtraction(path, result, tempDir, targetDir, mayDeleteSource) {
+        ; Clean success requires both OK status and extract exit 0 (never size ratio).
+        result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
+        result.mayDeleteSource := result.isCleanSuccess && mayDeleteSource
+
+        tempHasOutput := false
+        if DirExist(tempDir) {
+            loop files tempDir "\*.*", "DF" {
+                tempHasOutput := true
+                break
+            }
+        }
+
+        if (result.status = ArchiveStatus.OK && result.exitCode = 0) {
+            ; keep tempDir for existing post-zipx MoveItem / AfterUnzip
+            if (mayDeleteSource && result.isCleanSuccess)
+                this.RecycleItem(path, A_LineNumber)  ; Recycle Bin only (delete=false)
+            return result
+        }
+
+        if (result.status = ArchiveStatus.OK_WITH_WARNING) {
+            ; usable output stays in tempDir for movers; never source-handle
+            return result
+        }
+
+        if (tempHasOutput) {
+            SplitPath(path, , , , &nameNoExt)
+            stamp := FormatTime(, "yyyyMMdd-HHmmss")
+            partial := this.PathDupl(targetDir "\" nameNoExt "_解压不完整_" stamp, 1)
+            try DirMove(tempDir, partial)
+            catch {
+                try this.MoveItem(tempDir, partial, 1, A_LineNumber)
+            }
+            result.partialOutputDir := partial
+            this.WriteDiagnostic(result)
+            return result
+        }
+
+        if DirExist(tempDir)
+            this.RecycleItem(tempDir, A_LineNumber, true)
+        return result
+    }
+
+    WriteDiagnostic(result) {
+        if (result.HasOwnProp("_diagWritten") && result._diagWritten)
+            return result.HasOwnProp("_diagText") ? result._diagText : ""
+
+        baseName := result.archivePath
+        SplitPath(result.archivePath, &baseName)
+        ; IsSet guards: free globals hang AHK load when this method is sliced into harness hosts
+        ; that do not declare MainVersion/edition/buildVersion (e.g. PasswordPreflight fragment).
+        mv := IsSet(MainVersion) ? MainVersion : "unknown"
+        ed := IsSet(edition) ? edition : "unknown"
+        bv := IsSet(buildVersion) ? buildVersion : "unknown"
+        text := "SmartZip diagnostic`r`n"
+            . "smartZipVersion=" mv " " ed " (" bv ")`r`n"
+            . "sevenZipVersion=" (this.HasOwnProp("sevenZipVersion") ? this.sevenZipVersion : "unknown") "`r`n"
+            . "status=" result.status "`r`n"
+            . "stage=" result.stage "`r`n"
+            . "exitCode=" result.exitCode "`r`n"
+            . "archive=" baseName "`r`n"
+        if (result.missingVolumes.Length) {
+            text .= "missingVolumes="
+            for v in result.missingVolumes
+                text .= v ","
+            text .= "`r`n"
+        }
+        for w in result.warningLines
+            text .= "warning: " w "`r`n"
+        for e in result.errorLines
+            text .= "error: " e "`r`n"
+        if (result.output != "")
+            text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        ; Password/secret redaction first (default keeps full paths for internal use).
+        text := RedactDiagnostic(text)
+        if (result.partialOutputDir != "" && DirExist(result.partialOutputDir)) {
+            diagPath := result.partialOutputDir "\SmartZip-诊断.txt"
+            try FileDelete(diagPath)
+            ; Partial-dir SmartZip-诊断.txt is portable copy-safe evidence: basename only.
+            ; Full-path local rotating logs use FormatDiagnosticLogEntry separately (Task 7).
+            copySafeText := RedactDiagnostic(text, false)
+            FileAppend(copySafeText, diagPath, "UTF-8")
+        }
+        ; Rotating log only for warning or hard failure (not OK, not CANCELLED)
+        if (result.status = ArchiveStatus.OK_WITH_WARNING
+            || (result.status != ArchiveStatus.OK && result.status != ArchiveStatus.CANCELLED)) {
+            this.AppendRotatingDiagnosticLog(this.FormatDiagnosticLogEntry(result))
+        }
+        result._diagWritten := true
+        result._diagText := text
+        return text
+    }
+
+    DiagnosticTitle(result) {
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
+            return ""
+        if (result.status = ArchiveStatus.OK_WITH_WARNING)
+            return "SmartZip 解压警告"
+        return "SmartZip 未完成解压"
+    }
+
+    DiagnosticReason(result) {
+        switch result.status {
+            case ArchiveStatus.OK:
+                return "解压成功"
+            case ArchiveStatus.OK_WITH_WARNING:
+                return "解压完成，但 7-Zip 返回警告。"
+            case ArchiveStatus.NEED_PASSWORD:
+                return "压缩包需要密码。"
+            case ArchiveStatus.WRONG_PASSWORD:
+                return "密码错误。"
+            case ArchiveStatus.MISSING_VOLUME:
+                return "分卷不完整，或未从首卷开始。"
+            case ArchiveStatus.NOT_ARCHIVE:
+                return "文件不是可识别的压缩包。"
+            case ArchiveStatus.UNSUPPORTED_METHOD:
+                return "当前 7-Zip 不支持此压缩方法。"
+            case ArchiveStatus.HEADER_CORRUPT:
+                return "压缩包文件头损坏。"
+            case ArchiveStatus.TRUNCATED:
+                return "压缩包数据被截断。"
+            case ArchiveStatus.DATA_CORRUPT:
+                return "CRC 或数据校验失败。"
+            case ArchiveStatus.CANCELLED:
+                return "操作已取消。"
+            case ArchiveStatus.IO_ERROR:
+                return "读取或写入文件失败。"
+            default:
+                return "7-Zip 返回未识别错误。"
+        }
+    }
+
+    DiagnosticRecommendation(result) {
+        switch result.status {
+            case ArchiveStatus.OK:
+                return "无需操作。"
+            case ArchiveStatus.OK_WITH_WARNING:
+                return "请检查输出文件，并使用 7-Zip 复核压缩包。"
+            case ArchiveStatus.NEED_PASSWORD:
+                return "请重新输入正确密码后再试。"
+            case ArchiveStatus.WRONG_PASSWORD:
+                return "请检查密码并重新输入。"
+            case ArchiveStatus.MISSING_VOLUME:
+                return "请补齐全部分卷并从首卷重新解压。"
+            case ArchiveStatus.NOT_ARCHIVE:
+                return "请确认文件类型或使用 7-Zip 打开检查。"
+            case ArchiveStatus.UNSUPPORTED_METHOD:
+                return "请更新 7-Zip，或使用创建该压缩包的工具。"
+            case ArchiveStatus.HEADER_CORRUPT:
+                return "请重新获取完整源文件，并使用 7-Zip 测试。"
+            case ArchiveStatus.TRUNCATED:
+                return "请重新下载或复制完整文件后再试。"
+            case ArchiveStatus.DATA_CORRUPT:
+                return "请检查“不完整”目录中的可用文件，并重新获取源包。"
+            case ArchiveStatus.CANCELLED:
+                return "无需操作。"
+            case ArchiveStatus.IO_ERROR:
+                return "请检查磁盘空间、文件占用和目录权限。"
+            default:
+                return "请复制脱敏诊断信息，并使用 7-Zip 进一步检查。"
+        }
+    }
+
+    DiagnosticButtons(result) {
+        buttons := []
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
+            return buttons
+        if (result.partialOutputDir != "" && DirExist(result.partialOutputDir))
+            buttons.Push("打开部分文件目录")
+        if (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD)
+            buttons.Push("重新输入密码")
+        if (result.status = ArchiveStatus.MISSING_VOLUME)
+            buttons.Push("定位首卷")
+        buttons.Push("使用 7-Zip 打开")
+        buttons.Push("复制脱敏诊断信息")
+        buttons.Push("关闭")
+        return buttons
+    }
+
+    FormatDiagnosticCopy(result) {
+        baseName := result.archivePath
+        SplitPath(result.archivePath, &baseName)
+        mv := IsSet(MainVersion) ? MainVersion : "unknown"
+        ed := IsSet(edition) ? edition : "unknown"
+        bv := IsSet(buildVersion) ? buildVersion : "unknown"
+        text := "SmartZip diagnostic`r`n"
+            . "smartZipVersion=" mv " " ed " (" bv ")`r`n"
+            . "sevenZipVersion=" (this.HasOwnProp("sevenZipVersion") ? this.sevenZipVersion : "unknown") "`r`n"
+            . "status=" result.status "`r`n"
+            . "stage=" result.stage "`r`n"
+            . "exitCode=" result.exitCode "`r`n"
+            . "archive=" baseName "`r`n"
+        if (result.missingVolumes.Length) {
+            text .= "missingVolumes="
+            for v in result.missingVolumes
+                text .= v ","
+            text .= "`r`n"
+        }
+        for w in result.warningLines
+            text .= "warning: " w "`r`n"
+        for e in result.errorLines
+            text .= "error: " e "`r`n"
+        if (result.output != "")
+            text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        return RedactDiagnostic(text, false)
+    }
+
+    FormatDiagnosticLogEntry(result) {
+        mv := IsSet(MainVersion) ? MainVersion : "unknown"
+        ed := IsSet(edition) ? edition : "unknown"
+        bv := IsSet(buildVersion) ? buildVersion : "unknown"
+        ts := FormatTime(, "yyyy-MM-dd HH:mm:ss")
+        text := ts
+            . " smartZipVersion=" mv " " ed " (" bv ")"
+            . " sevenZipVersion=" (this.HasOwnProp("sevenZipVersion") ? this.sevenZipVersion : "unknown")
+            . " stage=" result.stage
+            . " status=" result.status
+            . " exitCode=" result.exitCode
+            . " archive=" result.archivePath
+        if (result.missingVolumes.Length) {
+            text .= " missingVolumes="
+            for v in result.missingVolumes
+                text .= v ","
+        }
+        for w in result.warningLines
+            text .= " warning=" w
+        for e in result.errorLines
+            text .= " error=" e
+        if (result.output != "")
+            text .= " output=" SubStr(result.output, 1, 4096)
+        return RedactDiagnostic(text, true)
+    }
+
+    RecordBatchDiagnostic(result) {
+        if !this.HasOwnProp("batchDiagnostic")
+            this.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
+        bucket := ""
+        if (result.HasOwnProp("batchBucket") && result.batchBucket != "")
+            bucket := result.batchBucket
+        else if (result.status = ArchiveStatus.OK)
+            bucket := "success"
+        else if (result.status = ArchiveStatus.OK_WITH_WARNING)
+            bucket := "warning"
+        else if (result.status = ArchiveStatus.CANCELLED)
+            bucket := "skipped"
+        else
+            bucket := "failure"
+        entry := result
+        if (bucket = "success")
+            this.batchDiagnostic.success.Push(entry)
+        else if (bucket = "warning")
+            this.batchDiagnostic.warning.Push(entry)
+        else if (bucket = "skipped")
+            this.batchDiagnostic.skipped.Push(entry)
+        else
+            this.batchDiagnostic.failure.Push(entry)
+        ; Warning/failure still write diagnostic/log even when batch suppresses popups
+        if (result.status = ArchiveStatus.OK_WITH_WARNING
+            || (result.status != ArchiveStatus.OK && result.status != ArchiveStatus.CANCELLED))
+            this.WriteDiagnostic(result)
+    }
+
+    ShowBatchDiagnosticSummary() {
+        if this.HasOwnProp("summaryCalls")
+            this.summaryCalls++
+        if !this.HasOwnProp("batchDiagnostic")
+            return
+        b := this.batchDiagnostic
+        sc := b.success.Length
+        wc := b.warning.Length
+        fc := b.failure.Length
+        kc := b.skipped.Length
+        if this.HasOwnProp("diagHeadless") && this.diagHeadless {
+            this.guiCalls := this.HasOwnProp("guiCalls") ? this.guiCalls : 0
+            return
+        }
+        msg := "批量解压完成`n成功: " sc "`n警告: " wc "`n失败: " fc "`n跳过: " kc
+        try TrayTip("SmartZip", msg)
+        catch {
+            MsgBox(msg, "SmartZip 批量摘要", "Iconi T5")
+        }
+    }
+
+    AppendRotatingDiagnosticLog(text) {
+        logPath := A_ScriptDir "\SmartZip-diagnostics.log"
+        if this.HasOwnProp("scriptDirOverride") && this.scriptDirOverride != ""
+            logPath := this.scriptDirOverride "\SmartZip-diagnostics.log"
+        this.RotateDiagnosticLogIfNeeded(logPath)
+        FileAppend(text "`r`n", logPath, "UTF-8")
+        if this.HasOwnProp("fileAppends")
+            this.fileAppends.Push({ path: logPath, encoding: "UTF-8", text: text })
+    }
+
+    RotateDiagnosticLogIfNeeded(logPath) {
+        if !FileExist(logPath) || FileGetSize(logPath) < 1048576
+            return
+        if FileExist(logPath ".2")
+            FileDelete(logPath ".2")
+        if FileExist(logPath ".1")
+            FileMove(logPath ".1", logPath ".2", 1)
+        FileMove(logPath, logPath ".1", 1)
+    }
+
+    ShowDiagnostic(result, isBatch := false) {
+        if IsSet(SmartZipTest_OnResult)
+            SmartZipTest_OnResult(result)
+        if isBatch {
+            this.RecordBatchDiagnostic(result)
+            return
+        }
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
+            return
+        this.WriteDiagnostic(result)
+        title := this.DiagnosticTitle(result)
+        reason := this.DiagnosticReason(result)
+        recommendation := this.DiagnosticRecommendation(result)
+        buttons := this.DiagnosticButtons(result)
+        archiveName := result.archivePath
+        SplitPath(result.archivePath, &archiveName)
+        partialPath := result.partialOutputDir
+
+        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui
+            return
+
+        if this.HasOwnProp("diagHeadless") && this.diagHeadless {
+            this.DiagnosticShowGui(title, archiveName, reason, recommendation, partialPath, buttons)
+            return
+        }
+
+        g := Gui("+AlwaysOnTop +MinSize320x180", title)
+        g.SetFont("s10")
+        g.AddText("w400", "压缩包: " archiveName)
+        g.AddText("w400", "原因: " reason)
+        g.AddText("w400", "建议: " recommendation)
+        g.AddText("w400", "源包已保留")
+        if (partialPath != "")
+            g.AddText("w400", "部分输出: " partialPath)
+        btnHosts := []
+        for label in buttons {
+            b := g.AddButton("w180", label)
+            btnHosts.Push({ ctrl: b, label: label })
+        }
+        archivePath := result.archivePath
+        volumeFirst := result.HasOwnProp("volumeFirst") ? result.volumeFirst : ""
+        for item in btnHosts {
+            lbl := item.label
+            item.ctrl.OnEvent("Click", (*) => this.DiagnosticButtonAction(lbl, result, archivePath, volumeFirst, partialPath, g))
+        }
+        g.Show("AutoSize Center")
+    }
+
+    DiagnosticButtonAction(label, result, archivePath, volumeFirst, partialPath, g) {
+        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
+            if (label = "关闭")
+                try g.Destroy()
+            return
+        }
+        switch label {
+            case "打开部分文件目录":
+                if (partialPath != "" && DirExist(partialPath))
+                    Run('explorer.exe "' partialPath '"')
+            case "重新输入密码":
+                try this.ResolveArchivePassword(archivePath, result)
+            case "定位首卷":
+                target := volumeFirst != "" ? volumeFirst : archivePath
+                if (target != "" && FileExist(target))
+                    Run('explorer.exe /select,"' target '"')
+                else {
+                    SplitPath(archivePath, , &dir)
+                    if DirExist(dir)
+                        Run('explorer.exe "' dir '"')
+                }
+            case "使用 7-Zip 打开":
+                if this.HasOwnProp("DiagnosticRun7zip")
+                    this.DiagnosticRun7zip(archivePath)
+                else
+                    Run('"' this.7zG '" "' archivePath '"')
+            case "复制脱敏诊断信息":
+                clip := this.FormatDiagnosticCopy(result)
+                if this.HasOwnProp("DiagnosticSetClipboard")
+                    this.DiagnosticSetClipboard(clip)
+                else
+                    A_Clipboard := clip
+            case "关闭":
+                try g.Destroy()
+        }
+    }
+
+    ; Full stdout+stderr capture for classification. Never kills the process on keyword match.
+    ; Returns { exitCode, output, cancelled }. Default code page is UTF-8 for 7-Zip -sccUTF-8 output.
+    RunCmdCapture(CmdLine, Codepage := "UTF-8") {
+        cancelled := false
+        exitCode := -1
+        sOutput := ""
+
+        DllCall("CreatePipe", "PtrP", &hPipeR := 0, "PtrP", &hPipeW := 0, "Ptr", 0, "Int", 0)
+        , DllCall("SetHandleInformation", "Ptr", hPipeW, "Int", 1, "Int", 1)
+        , DllCall("SetNamedPipeHandleState", "Ptr", hPipeR, "UIntP", &PIPE_NOWAIT := 1, "Ptr", 0, "Ptr", 0)
+
+        , P8 := (A_PtrSize = 8)
+        , SI := Buffer(P8 ? 104 : 68, 0)
+        , NumPut("UInt", P8 ? 104 : 68, SI)
+        , NumPut("UInt", STARTF_USESTDHANDLES := 0x100, SI, P8 ? 60 : 44)
+        , NumPut("Ptr", hPipeW, SI, P8 ? 88 : 60)	; hStdOutput
+        , NumPut("Ptr", hPipeW, SI, P8 ? 96 : 64)	; hStdError
+        , PI := Buffer(P8 ? 24 : 16, 0)
+
+        if !DllCall("CreateProcess", "Ptr", 0, "Str", CmdLine, "Ptr", 0, "Int", 0, "Int", True
+            , "Int", 0x08000000 | DllCall("GetPriorityClass", "Ptr", -1, "UInt"), "Int", 0
+            , "Ptr", 0, "Ptr", SI.ptr, "Ptr", PI.ptr) {
+            DllCall("CloseHandle", "Ptr", hPipeW)
+            DllCall("CloseHandle", "Ptr", hPipeR)
+            return { exitCode: -1, output: "", cancelled: false }
+        }
+
+        DllCall("CloseHandle", "Ptr", hPipeW)
+        hProcess := NumGet(PI, 0, "Ptr")
+        hThread := NumGet(PI, A_PtrSize, "Ptr")
+        this.CMDPID := NumGet(PI, P8 ? 16 : 8, "UInt")
+
+        enc := Codepage
+        if (enc = "UTF-8" || enc = "utf-8")
+            enc := "UTF-8"
+        File := FileOpen(hPipeR, "h", enc)
+
+        ; Read until the process exits; never ProcessClose on output content.
+        loop {
+            still := DllCall("PeekNamedPipe", "Ptr", hPipeR, "Ptr", 0, "Int", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0)
+            while !File.AtEOF {
+                chunk := File.Read(4096)
+                if (chunk != "")
+                    sOutput .= chunk
+                else
+                    break
+            }
+            if !DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 15) {
+                ; drain remaining bytes after exit
+                while !File.AtEOF {
+                    chunk := File.Read(4096)
+                    if (chunk != "")
+                        sOutput .= chunk
+                    else
+                        break
+                }
+                break
+            }
+            if !still && !DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 0) {
+                break
+            }
+        }
+
+        if !DllCall("GetExitCodeProcess", "Ptr", hProcess, "UIntP", &ec := 0)
+            exitCode := -1
+        else
+            exitCode := Integer(ec)
+
+        DllCall("CloseHandle", "Ptr", hProcess)
+        DllCall("CloseHandle", "Ptr", hThread)
+        DllCall("CloseHandle", "Ptr", hPipeR)
+        this.CMDPID := 0
+
+        cancelled := (exitCode = 255)
+        return { exitCode: exitCode, output: sOutput, cancelled: cancelled }
     }
 
     ;https://www.autohotkey.com/boards/viewtopic.php?t=93944
@@ -1334,7 +1931,7 @@ class SmartZip
             this.error := true
             cmdArgs := line
             if this.cmdLog
-                this.testLog .= '`n#####`n' cmdArgs '`n'
+                this.testLog .= '`n#####`n' RedactDiagnostic(cmdArgs) '`n'
 
             this.RunCmd(cmdArgs)
 
@@ -1344,7 +1941,7 @@ class SmartZip
                 return
 
             if this.cmdLog
-                this.testLog .= "[" what "] " line '`n'
+                this.testLog .= "[" what "] " RedactDiagnostic(line) '`n'
 
             ; for i in check.errorrContinueExp
             ;     if line ~= i && --check.errorrContinueExp[i] < 1
@@ -1495,7 +2092,6 @@ Setting()
     lineGeneration("xs")
     GuiUpDownEdit("logLevel", "日志等级", ini.logLevel, 5, "关闭0/删除1/重命名2/命令行错误3/命令行正确4/其他5")
     GuiUpDownEdit("hideRunSize", "隐藏运行", ini.hideRunSize, , "源文件大小(单位 MB)小于此值的会隐藏运行", "xs")
-    GuiUpDownEdit("successPercent", "判断解压成功百分比", ini.successPercent, 100, "部分文件可能解压后大小会小于源文件`n只要解压到一定百分比就判断解压成功", "xs")
     set.AddText("xs")
     if FileExist(A_ScriptDir "\log.txt")
         set.AddButton("", "查看日志").OnEvent("Click", (*) => Run(A_ScriptDir "\log.txt"))
@@ -1984,6 +2580,38 @@ class ini
 
 RelativePath(str) => StrReplace(str, "%SmartZipDir%", A_ScriptDir)
 
+MigrateDeprecatedExtExp()
+{
+    kept := []
+    idx := 0
+    loop
+    {
+        if !(var := ini.Read(A_Index, , "extExp"))
+            break
+        idx := A_Index
+        if (var == "zi" || var == "7" || var == "z")
+            continue
+        kept.Push(var)
+    }
+    if !idx
+        return
+    hadDeprecated := false
+    loop idx
+    {
+        var := ini.Read(A_Index, , "extExp")
+        if (var == "zi" || var == "7" || var == "z") {
+            hadDeprecated := true
+            break
+        }
+    }
+    if !hadDeprecated
+        return
+    loop idx
+        ini.Delete("extExp", A_Index)
+    for i, rule in kept
+        ini.Write(rule, i, "extExp")
+}
+
 IniCreate()
 {
     iniExist := FileExist(ini.path)
@@ -2029,9 +2657,6 @@ IniCreate()
         ini.Write("tar", 9)
 
         ini.Write("^\d+$", 1, "extExp")
-        ini.Write("zi", 2)
-        ini.Write("7", 3)
-        ini.Write("z", 4)
 
         ini.Write("iso", 1, "extForOpen")
         ini.Write("apk", 2)
@@ -2078,6 +2703,8 @@ IniCreate()
 
         ini.Write("\d*-\d*-\d* *\d*:\d*:\d* *\d* *\d* *(\d*) files(, (\d*) folders)?<--->1", 1, "openZipCheckSuccessExp")	;多少个文件多少个文件夹则可能是压缩文件
     }
+
+    MigrateDeprecatedExtExp()
 
     if VersionsCompare(buildVersion)
         ini.setWrite("version", buildVersion)
