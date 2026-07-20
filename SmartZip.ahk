@@ -914,7 +914,13 @@ class SmartZip
             {
                 SetTimer(GetWriteIO, 0)
                 g.ioRunning := false
-                ProcessClose(this.pid)
+                g.errorMode := false
+                g.io := 0
+                pid := this.pid
+                this.pid := ""
+                this.query := ""
+                this.exactPid := false
+                ProcessClose(pid)
                 return
             }
             DetectHiddenWindows(1)
@@ -991,8 +997,19 @@ class SmartZip
             if !this.isRunning
                 Close()
 
-            if A_TickCount - timeSave < 50 || wParam != 6 || !WinExist(sub())
+            if A_TickCount - timeSave < 50 || wParam != 6
                 return
+            if !WinExist(sub())
+            {
+                if g.errorMode || g.ioRunning
+                {
+                    SetTimer(GetWriteIO, 0)
+                    g.ioRunning := false
+                    g.errorMode := false
+                    g.io := 0
+                }
+                return
+            }
 
             IsChanged(总进度1, "总进度:")
             , IsChanged(总进度2, this.index "\" this.arr.Length)

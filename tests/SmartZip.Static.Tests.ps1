@@ -436,14 +436,45 @@ Describe 'ErrorModeStateMachine' {
 
     It 'force end requires ErrorMode and exact PID' {
         # Full product gate: errorMode && exactPid && pid && ProcessExist(pid).
+        # Close uses a captured local pid after bind invalidation (not this.pid).
         $ok = Test-Regex -Text $script:GuiBody -Pattern `
-            '(?s)ButtonPause\(.*?g\.errorMode\s*&&\s*this\.exactPid\s*&&\s*this\.pid\s*&&\s*ProcessExist\(\s*this\.pid\s*\).*?ProcessClose\(\s*this\.pid\s*\)'
+            '(?s)ButtonPause\(.*?g\.errorMode\s*&&\s*this\.exactPid\s*&&\s*this\.pid\s*&&\s*ProcessExist\(\s*this\.pid\s*\).*?ProcessClose\(\s*pid\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'force end invalidates exact PID bind before ProcessClose' {
+        # Capture authorized PID, clear bind, then close only the captured value.
+        # A second click must not reuse a stale exactPid authorization.
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)ButtonPause\(.*?g\.errorMode\s*&&\s*this\.exactPid\s*&&\s*this\.pid\s*&&\s*ProcessExist\(\s*this\.pid\s*\).*?SetTimer\(\s*GetWriteIO\s*,\s*0\s*\).*?g\.ioRunning\s*:=\s*false.*?pid\s*:=\s*this\.pid.*?this\.pid\s*:=\s*"".*?this\.query\s*:=\s*"".*?this\.exactPid\s*:=\s*false.*?ProcessClose\(\s*pid\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'target-window loss clears ErrorMode and stops IO sampling' {
+        # ShellMessage !WinExist path must disarm timer/state when ErrorMode or IO is armed
+        # so sequential Run7z items cannot inherit a prior fault mode.
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)if\s+!WinExist\(\s*sub\(\)\s*\)\s*\{\s*if\s+g\.errorMode\s*\|\|\s*g\.ioRunning\s*\{\s*SetTimer\(\s*GetWriteIO\s*,\s*0\s*\).*?g\.ioRunning\s*:=\s*false.*?g\.errorMode\s*:=\s*false.*?g\.io\s*:=\s*0'
+        $ok | Should Be $true
+    }
+
+    It 'ShellMessage keeps non-error throttle/wParam fast return separate from window-loss clear' {
+        # Throttle and wParam!=6 remain a minimal early return; window-loss is a distinct check.
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)ShellMessage\s*\(.*?if\s+A_TickCount\s*-\s*timeSave\s*<\s*50\s*\|\|\s*wParam\s*!=\s*6\s+return.*?if\s+!WinExist\(\s*sub\(\)\s*\)'
         $ok | Should Be $true
     }
 
     It 'show-hide is disabled during ErrorMode or IO sampling' {
         $ok = Test-Regex -Text $script:GuiBody -Pattern `
             '(?s)ButtonShowHide\(.*?if\s+g\.errorMode\s*\|\|\s*g\.ioRunning\s+return'
+        $ok | Should Be $true
+    }
+
+    It 'Close ProcessClose is gated by exactPid and pid' {
+        # Close(*) kill path must require exactPid + pid + ProcessExist before ProcessClose(this.pid).
+        $ok = Test-Regex -Text $script:GuiBody -Pattern `
+            '(?s)Close\(\*\).*?if\s+this\.exactPid\s*&&\s*this\.pid\s*&&\s*ProcessExist\(\s*this\.pid\s*\).*?ProcessClose\(\s*this\.pid\s*\)'
         $ok | Should Be $true
     }
 }
