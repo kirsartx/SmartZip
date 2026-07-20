@@ -159,10 +159,15 @@ function Test-NoPasswordLeak {
         if ([string]::IsNullOrEmpty($t)) { continue }
         if ($t.Contains($Password)) { return $false }
         if ($t -match ('(?i)-p' + [regex]::Escape($Password))) { return $false }
+        # Quoted -p"secret" is always a leak.
         if ($t -match '(?i)-p"[^"]+"') { return $false }
-        if ($t -match '(?i)-p\S+') {
-            # flag raw -p tokens that are not empty -p alone
-            if ($t -match '(?i)-p[^\s"]+') { return $false }
+        # Flag raw -pVALUE tokens. Allow empty -p and product redaction placeholder -p*** (or -p****...).
+        $matches = [regex]::Matches($t, '(?i)-p([^\s"]*)')
+        foreach ($m in $matches) {
+            $val = $m.Groups[1].Value
+            if ([string]::IsNullOrEmpty($val)) { continue }          # bare -p (empty password arg)
+            if ($val -match '^\*+$') { continue }                    # redacted placeholder
+            return $false
         }
     }
     return $true
