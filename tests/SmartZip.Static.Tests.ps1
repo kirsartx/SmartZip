@@ -788,7 +788,13 @@ $script:ExtractArchiveToTempBody = Get-SourceSlice -Source $script:SmartZipSourc
 $script:FinalizeExtractionBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    FinalizeExtraction(" -EndMarker "`n    WriteDiagnostic("
 $script:WriteDiagnosticBody = Get-SourceSlice -Source $script:SmartZipSource `
-    -StartMarker "`n    WriteDiagnostic(" -EndMarker "`n    RunCmdCapture("
+    -StartMarker "`n    WriteDiagnostic(" -EndMarker "`n    ShowDiagnostic("
+if ([string]::IsNullOrEmpty($script:WriteDiagnosticBody)) {
+    $script:WriteDiagnosticBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    WriteDiagnostic(" -EndMarker "`n    RunCmdCapture("
+}
+$script:ShowDiagnosticBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    ShowDiagnostic(" -EndMarker "`n    RunCmdCapture("
 
 Describe 'ExtractionLifecycleSafety' {
 
@@ -1026,5 +1032,192 @@ Describe 'NestingProbeAndMigrationSafety' {
         $u | Should Match 'OK_WITH_WARNING'
         $u | Should Match 'nestedMayRecycle\s*:=\s*false'
         $u | Should Not Match 'RecycleItem\s*\(\s*path\s*,[^\n]*true'
+    }
+}
+
+$script:DiagnosticButtonsBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    DiagnosticButtons(" -EndMarker "`n    FormatDiagnosticCopy("
+if ([string]::IsNullOrEmpty($script:DiagnosticButtonsBody)) {
+    $script:DiagnosticButtonsBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    DiagnosticButtons(" -EndMarker "`n    RunCmdCapture("
+}
+$script:RotateDiagnosticLogBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    RotateDiagnosticLogIfNeeded(" -EndMarker "`n    RunCmdCapture("
+$script:AppendRotatingDiagnosticLogBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    AppendRotatingDiagnosticLog(" -EndMarker "`n    RotateDiagnosticLogIfNeeded("
+if ([string]::IsNullOrEmpty($script:AppendRotatingDiagnosticLogBody)) {
+    $script:AppendRotatingDiagnosticLogBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    AppendRotatingDiagnosticLog(" -EndMarker "`n    RunCmdCapture("
+}
+
+Describe 'DiagnosticUISafety' {
+
+    It 'WriteDiagnostic precedes ShowDiagnostic which precedes RunCmdCapture' {
+        $w = $script:SmartZipSource.IndexOf("`n    WriteDiagnostic(")
+        $s = $script:SmartZipSource.IndexOf("`n    ShowDiagnostic(")
+        $r = $script:SmartZipSource.IndexOf("`n    RunCmdCapture(")
+        ($w -ge 0 -and $s -gt $w -and $r -gt $s) | Should Be $true
+        [string]::IsNullOrEmpty($script:WriteDiagnosticBody) | Should Be $false
+        [string]::IsNullOrEmpty($script:ShowDiagnosticBody) | Should Be $false
+    }
+
+    It 'ShowDiagnostic and WriteDiagnostic public signatures unchanged' {
+        $script:SmartZipSource | Should Match '(?m)^    ShowDiagnostic\(result,\s*isBatch\s*:=\s*false\)'
+        $script:SmartZipSource | Should Match '(?m)^    WriteDiagnostic\(result\)'
+        $script:SmartZipSource | Should Not Match '(?m)^    ShowDiagnostic\([^)]*isBatch\s*:=\s*true'
+        $script:SmartZipSource | Should Not Match '(?m)^    WriteDiagnostic\(result\s*,'
+    }
+
+    It 'failure and warning Chinese diagnostic titles exist' {
+        $script:SmartZipSource | Should Match 'SmartZip 解压警告'
+        $script:SmartZipSource | Should Match 'SmartZip 未完成解压'
+        $script:SmartZipSource | Should Match '(?m)^    DiagnosticTitle\s*\('
+        $script:SmartZipSource | Should Match 'OK_WITH_WARNING'
+    }
+
+    It 'all six diagnostic button labels exist' {
+        foreach ($label in @(
+                '打开部分文件目录',
+                '重新输入密码',
+                '定位首卷',
+                '使用 7-Zip 打开',
+                '复制脱敏诊断信息',
+                '关闭'
+            )) {
+            ($script:SmartZipSource.Contains($label)) | Should Be $true
+        }
+    }
+
+    It 'partial directory action requires non-empty existing partialOutputDir' {
+        $btn = $script:DiagnosticButtonsBody
+        if ([string]::IsNullOrEmpty($btn)) { $btn = $script:SmartZipSource }
+        $btn | Should Match 'partialOutputDir'
+        $btn | Should Match '打开部分文件目录'
+        $ok = Test-Regex -Text $btn -Pattern 'DirExist\s*\(\s*result\.partialOutputDir|partialOutputDir\s*!=\s*""'
+        $ok | Should Be $true
+    }
+
+    It 'password retry limited to NEED_PASSWORD and WRONG_PASSWORD' {
+        $btn = $script:DiagnosticButtonsBody
+        if ([string]::IsNullOrEmpty($btn)) { $btn = $script:SmartZipSource }
+        $btn | Should Match 'NEED_PASSWORD'
+        $btn | Should Match 'WRONG_PASSWORD'
+        $btn | Should Match '重新输入密码'
+        $ok = Test-Regex -Text $btn -Pattern `
+            '(?s)(NEED_PASSWORD|WRONG_PASSWORD).{0,240}重新输入密码|重新输入密码.{0,240}(NEED_PASSWORD|WRONG_PASSWORD)'
+        $ok | Should Be $true
+    }
+
+    It 'locate first volume limited to MISSING_VOLUME' {
+        $btn = $script:DiagnosticButtonsBody
+        if ([string]::IsNullOrEmpty($btn)) { $btn = $script:SmartZipSource }
+        $btn | Should Match 'MISSING_VOLUME'
+        $btn | Should Match '定位首卷'
+        $ok = Test-Regex -Text $btn -Pattern `
+            '(?s)MISSING_VOLUME.{0,240}定位首卷|定位首卷.{0,240}MISSING_VOLUME'
+        $ok | Should Be $true
+    }
+
+    It 'batch mode uses this.muilt reset and one outer ShowBatchDiagnosticSummary' {
+        $u = $script:UnzipBody
+        $u | Should Match 'this\.muilt'
+        $okReset = Test-Regex -Text $u -Pattern `
+            '(?s)isBatch\s*:=\s*this\.muilt.{0,400}batchDiagnostic|(!loopPath\s*&&\s*(this\.muilt|isBatch)).{0,400}batchDiagnostic'
+        $okReset | Should Be $true
+        $okSum = Test-Regex -Text $u -Pattern `
+            '(?s)(!loopPath\s*&&\s*(isBatch|this\.muilt)).{0,200}ShowBatchDiagnosticSummary\s*\('
+        $okSum | Should Be $true
+        $defs = [regex]::Matches($script:SmartZipSource, '(?m)^    ShowBatchDiagnosticSummary\s*\(')
+        $defs.Count | Should Be 1
+    }
+
+    It 'batch buckets are success warning failure skipped' {
+        $script:SmartZipSource | Should Match 'success:\s*\[\]'
+        $script:SmartZipSource | Should Match 'warning:\s*\[\]'
+        $script:SmartZipSource | Should Match 'failure:\s*\[\]'
+        $script:SmartZipSource | Should Match 'skipped:\s*\[\]'
+        $script:SmartZipSource | Should Match '(?m)^    RecordBatchDiagnostic\s*\('
+        $script:SmartZipSource | Should Match 'batchBucket'
+    }
+
+    It 'OK and CANCELLED create neither popup nor rotating log entry' {
+        $show = $script:ShowDiagnosticBody
+        if ([string]::IsNullOrEmpty($show)) { $show = '' }
+        $show | Should Match 'CANCELLED'
+        $okSilent = Test-Regex -Text $show -Pattern `
+            '(?s)(OK|CANCELLED).{0,400}return|return.{0,120}(OK|CANCELLED)'
+        $okSilent | Should Be $true
+        $wd = $script:WriteDiagnosticBody
+        $wd | Should Match 'OK_WITH_WARNING|AppendRotatingDiagnosticLog'
+        $wd | Should Match 'CANCELLED'
+    }
+
+    It 'warning and failure paths call WriteDiagnostic' {
+        $script:SmartZipSource | Should Match 'WriteDiagnostic\s*\(\s*result\s*\)'
+        $show = $script:ShowDiagnosticBody
+        $u = $script:UnzipBody
+        $ok = (Test-Regex -Text $show -Pattern 'WriteDiagnostic\s*\(') -or
+            (Test-Regex -Text $u -Pattern 'WriteDiagnostic\s*\(')
+        $ok | Should Be $true
+        $wd = $script:WriteDiagnosticBody
+        $wd | Should Match 'AppendRotatingDiagnosticLog\s*\('
+    }
+
+    It 'rotating log names are SmartZip-diagnostics.log .1 and .2' {
+        $script:SmartZipSource | Should Match 'SmartZip-diagnostics\.log'
+        (Test-Regex -Text $script:SmartZipSource -Pattern 'logPath\s*"\.1') | Should Be $true
+        (Test-Regex -Text $script:SmartZipSource -Pattern 'logPath\s*"\.2') | Should Be $true
+    }
+
+    It 'rotation threshold is 1048576 and log writer uses UTF-8' {
+        $script:SmartZipSource | Should Match '1048576'
+        $rot = $script:RotateDiagnosticLogBody
+        if ([string]::IsNullOrEmpty($rot)) { $rot = $script:SmartZipSource }
+        $rot | Should Match 'FileGetSize\s*\(\s*logPath\s*\)\s*<\s*1048576'
+        $app = $script:AppendRotatingDiagnosticLogBody
+        if ([string]::IsNullOrEmpty($app)) { $app = $script:SmartZipSource }
+        $app | Should Match 'FileAppend\s*\([^,]+,\s*logPath\s*,\s*"UTF-8"\s*\)'
+        $script:WriteDiagnosticBody | Should Match 'FileAppend\s*\([^,]+,\s*diagPath\s*,\s*"UTF-8"\s*\)'
+    }
+
+    It 'copy redacts with false full path; local log permits full paths' {
+        $script:SmartZipSource | Should Match 'RedactDiagnostic\s*\([^,]+,\s*false\s*\)'
+        $okLog = Test-Regex -Text $script:WriteDiagnosticBody -Pattern `
+            'RedactDiagnostic\s*\(\s*[^,\)]+\s*\)|RedactDiagnostic\s*\([^,]+,\s*true\s*\)'
+        $okLog | Should Be $true
+        $script:SmartZipSource | Should Match '(?m)^    FormatDiagnosticCopy\s*\('
+    }
+
+    It 'passwordUsed and clipboard contents absent from diagnostic composition' {
+        # Composition methods only — exclude button action sinks that may write clipboard.
+        $markers = @(
+            @{ Start = "`n    WriteDiagnostic("; End = "`n    DiagnosticTitle(" },
+            @{ Start = "`n    DiagnosticReason("; End = "`n    DiagnosticRecommendation(" },
+            @{ Start = "`n    DiagnosticRecommendation("; End = "`n    DiagnosticButtons(" },
+            @{ Start = "`n    FormatDiagnosticCopy("; End = "`n    FormatDiagnosticLogEntry(" },
+            @{ Start = "`n    FormatDiagnosticLogEntry("; End = "`n    RecordBatchDiagnostic(" }
+        )
+        foreach ($m in $markers) {
+            $slice = Get-SourceSlice -Source $script:SmartZipSource -StartMarker $m.Start -EndMarker $m.End
+            if ([string]::IsNullOrEmpty($slice)) { continue }
+            $slice | Should Not Match 'passwordUsed'
+            $slice | Should Not Match 'A_Clipboard'
+        }
+        $script:WriteDiagnosticBody | Should Not Match 'passwordUsed'
+    }
+
+    It 'every legacy cmdLog testLog append is wrapped in RedactDiagnostic' {
+        $combined = $script:SmartZipSource
+        (Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(') | Should Be $true
+        $rawCmdArgs = Test-Regex -Text $combined -Pattern `
+            "testLog\s*\.=\s*'``n#####``n'\s*cmdArgs|testLog\s*\.=\s*``n#####``n'\s*cmdArgs"
+        # Bare cmdArgs concatenation without RedactDiagnostic is forbidden
+        $rawBare = Test-Regex -Text $combined -Pattern `
+            "testLog\s*\.=\s*'``n#####``n'\s*cmdArgs\s*'``n'"
+        $rawBare | Should Be $false
+        $hasRedactCmdArgs = Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(\s*cmdArgs\s*\)'
+        $hasRedactCmdArgs | Should Be $true
+        $hasRedactLine = Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(\s*line\s*\)'
+        $hasRedactLine | Should Be $true
     }
 }

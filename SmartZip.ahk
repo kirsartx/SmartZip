@@ -220,8 +220,11 @@ class SmartZip
 
     Unzip(loopPath := "")
     {
+        isBatch := this.muilt
         if !loopPath
             this.processedVolumeFirst := Map()
+        if (!loopPath && isBatch)
+            this.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
         if !loopPath
         {
             arr := this.arr
@@ -357,6 +360,9 @@ class SmartZip
         if loopPath
             return
 
+        if (!loopPath && isBatch)
+            this.ShowBatchDiagnosticSummary()
+
         if this.autoRemovePass && (this.dynamicPassSort || this.autoAddPass)
         {
             if this.dynamicPassSort
@@ -391,13 +397,17 @@ class SmartZip
                     this.processedVolumeFirst := Map()
                 if this.processedVolumeFirst.Has(key) {
                     this.error := false  ; intentional duplicate member skip, not an extraction failure
+                    skipResult := ArchiveResult(ArchiveStatus.OK, "probe", 0, path)
+                    skipResult.batchBucket := "skipped"
+                    this.ShowDiagnostic(skipResult, isBatch)
                     return
                 }
                 if (volume.missingVolumes.Length || !FileExist(volume.firstPath)) {
                     missing := ArchiveResult(ArchiveStatus.MISSING_VOLUME, "probe", 2, path)
                     missing.volumeFirst := volume.firstPath
                     missing.missingVolumes := volume.missingVolumes
-                    return missing
+                    this.ShowDiagnostic(missing, isBatch)
+                    return
                 }
                 this.processedVolumeFirst[key] := true
                 path := volume.firstPath
@@ -418,6 +428,7 @@ class SmartZip
                 this.error := true
                 if (resolved.status = ArchiveStatus.CANCELLED)
                     this.exitCode := 255
+                this.ShowDiagnostic(resolved, isBatch)
                 return
             }
 
@@ -438,6 +449,7 @@ class SmartZip
                     this.error := true
                     if (tr.status = ArchiveStatus.CANCELLED)
                         this.exitCode := 255
+                    this.ShowDiagnostic(tr, isBatch)
                     return
                 }
             }
@@ -461,6 +473,8 @@ class SmartZip
             ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
             if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
                 this.RecycleItem(path, A_LineNumber, false)
+
+            this.ShowDiagnostic(extractResult, isBatch)
         }
 
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
@@ -1424,6 +1438,9 @@ class SmartZip
     }
 
     WriteDiagnostic(result) {
+        if (result.HasOwnProp("_diagWritten") && result._diagWritten)
+            return result.HasOwnProp("_diagText") ? result._diagText : ""
+
         baseName := result.archivePath
         SplitPath(result.archivePath, &baseName)
         ; IsSet guards: free globals hang AHK load when this method is sliced into harness hosts
@@ -1456,7 +1473,299 @@ class SmartZip
             try FileDelete(diagPath)
             FileAppend(text, diagPath, "UTF-8")
         }
+        ; Rotating log only for warning or hard failure (not OK, not CANCELLED)
+        if (result.status = ArchiveStatus.OK_WITH_WARNING
+            || (result.status != ArchiveStatus.OK && result.status != ArchiveStatus.CANCELLED)) {
+            this.AppendRotatingDiagnosticLog(this.FormatDiagnosticLogEntry(result))
+        }
+        result._diagWritten := true
+        result._diagText := text
         return text
+    }
+
+    DiagnosticTitle(result) {
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
+            return ""
+        if (result.status = ArchiveStatus.OK_WITH_WARNING)
+            return "SmartZip 解压警告"
+        return "SmartZip 未完成解压"
+    }
+
+    DiagnosticReason(result) {
+        switch result.status {
+            case ArchiveStatus.OK:
+                return "解压成功"
+            case ArchiveStatus.OK_WITH_WARNING:
+                return "解压完成，但 7-Zip 返回警告。"
+            case ArchiveStatus.NEED_PASSWORD:
+                return "压缩包需要密码。"
+            case ArchiveStatus.WRONG_PASSWORD:
+                return "密码错误。"
+            case ArchiveStatus.MISSING_VOLUME:
+                return "分卷不完整，或未从首卷开始。"
+            case ArchiveStatus.NOT_ARCHIVE:
+                return "文件不是可识别的压缩包。"
+            case ArchiveStatus.UNSUPPORTED_METHOD:
+                return "当前 7-Zip 不支持此压缩方法。"
+            case ArchiveStatus.HEADER_CORRUPT:
+                return "压缩包文件头损坏。"
+            case ArchiveStatus.TRUNCATED:
+                return "压缩包数据被截断。"
+            case ArchiveStatus.DATA_CORRUPT:
+                return "CRC 或数据校验失败。"
+            case ArchiveStatus.CANCELLED:
+                return "操作已取消。"
+            case ArchiveStatus.IO_ERROR:
+                return "读取或写入文件失败。"
+            default:
+                return "7-Zip 返回未识别错误。"
+        }
+    }
+
+    DiagnosticRecommendation(result) {
+        switch result.status {
+            case ArchiveStatus.OK:
+                return "无需操作。"
+            case ArchiveStatus.OK_WITH_WARNING:
+                return "请检查输出文件，并使用 7-Zip 复核压缩包。"
+            case ArchiveStatus.NEED_PASSWORD:
+                return "请重新输入正确密码后再试。"
+            case ArchiveStatus.WRONG_PASSWORD:
+                return "请检查密码并重新输入。"
+            case ArchiveStatus.MISSING_VOLUME:
+                return "请补齐全部分卷并从首卷重新解压。"
+            case ArchiveStatus.NOT_ARCHIVE:
+                return "请确认文件类型或使用 7-Zip 打开检查。"
+            case ArchiveStatus.UNSUPPORTED_METHOD:
+                return "请更新 7-Zip，或使用创建该压缩包的工具。"
+            case ArchiveStatus.HEADER_CORRUPT:
+                return "请重新获取完整源文件，并使用 7-Zip 测试。"
+            case ArchiveStatus.TRUNCATED:
+                return "请重新下载或复制完整文件后再试。"
+            case ArchiveStatus.DATA_CORRUPT:
+                return "请检查“不完整”目录中的可用文件，并重新获取源包。"
+            case ArchiveStatus.CANCELLED:
+                return "无需操作。"
+            case ArchiveStatus.IO_ERROR:
+                return "请检查磁盘空间、文件占用和目录权限。"
+            default:
+                return "请复制脱敏诊断信息，并使用 7-Zip 进一步检查。"
+        }
+    }
+
+    DiagnosticButtons(result) {
+        buttons := []
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
+            return buttons
+        if (result.partialOutputDir != "" && DirExist(result.partialOutputDir))
+            buttons.Push("打开部分文件目录")
+        if (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD)
+            buttons.Push("重新输入密码")
+        if (result.status = ArchiveStatus.MISSING_VOLUME)
+            buttons.Push("定位首卷")
+        buttons.Push("使用 7-Zip 打开")
+        buttons.Push("复制脱敏诊断信息")
+        buttons.Push("关闭")
+        return buttons
+    }
+
+    FormatDiagnosticCopy(result) {
+        baseName := result.archivePath
+        SplitPath(result.archivePath, &baseName)
+        mv := IsSet(MainVersion) ? MainVersion : "unknown"
+        ed := IsSet(edition) ? edition : "unknown"
+        bv := IsSet(buildVersion) ? buildVersion : "unknown"
+        text := "SmartZip diagnostic`r`n"
+            . "smartZipVersion=" mv " " ed " (" bv ")`r`n"
+            . "sevenZipVersion=" (this.HasOwnProp("sevenZipVersion") ? this.sevenZipVersion : "unknown") "`r`n"
+            . "status=" result.status "`r`n"
+            . "stage=" result.stage "`r`n"
+            . "exitCode=" result.exitCode "`r`n"
+            . "archive=" baseName "`r`n"
+        if (result.missingVolumes.Length) {
+            text .= "missingVolumes="
+            for v in result.missingVolumes
+                text .= v ","
+            text .= "`r`n"
+        }
+        for w in result.warningLines
+            text .= "warning: " w "`r`n"
+        for e in result.errorLines
+            text .= "error: " e "`r`n"
+        if (result.output != "")
+            text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        return RedactDiagnostic(text, false)
+    }
+
+    FormatDiagnosticLogEntry(result) {
+        mv := IsSet(MainVersion) ? MainVersion : "unknown"
+        ed := IsSet(edition) ? edition : "unknown"
+        bv := IsSet(buildVersion) ? buildVersion : "unknown"
+        ts := FormatTime(, "yyyy-MM-dd HH:mm:ss")
+        text := ts
+            . " smartZipVersion=" mv " " ed " (" bv ")"
+            . " sevenZipVersion=" (this.HasOwnProp("sevenZipVersion") ? this.sevenZipVersion : "unknown")
+            . " stage=" result.stage
+            . " status=" result.status
+            . " exitCode=" result.exitCode
+            . " archive=" result.archivePath
+        if (result.missingVolumes.Length) {
+            text .= " missingVolumes="
+            for v in result.missingVolumes
+                text .= v ","
+        }
+        for w in result.warningLines
+            text .= " warning=" w
+        for e in result.errorLines
+            text .= " error=" e
+        if (result.output != "")
+            text .= " output=" SubStr(result.output, 1, 4096)
+        return RedactDiagnostic(text, true)
+    }
+
+    RecordBatchDiagnostic(result) {
+        if !this.HasOwnProp("batchDiagnostic")
+            this.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
+        bucket := ""
+        if (result.HasOwnProp("batchBucket") && result.batchBucket != "")
+            bucket := result.batchBucket
+        else if (result.status = ArchiveStatus.OK)
+            bucket := "success"
+        else if (result.status = ArchiveStatus.OK_WITH_WARNING)
+            bucket := "warning"
+        else if (result.status = ArchiveStatus.CANCELLED)
+            bucket := "skipped"
+        else
+            bucket := "failure"
+        entry := result
+        if (bucket = "success")
+            this.batchDiagnostic.success.Push(entry)
+        else if (bucket = "warning")
+            this.batchDiagnostic.warning.Push(entry)
+        else if (bucket = "skipped")
+            this.batchDiagnostic.skipped.Push(entry)
+        else
+            this.batchDiagnostic.failure.Push(entry)
+        ; Warning/failure still write diagnostic/log even when batch suppresses popups
+        if (result.status = ArchiveStatus.OK_WITH_WARNING
+            || (result.status != ArchiveStatus.OK && result.status != ArchiveStatus.CANCELLED))
+            this.WriteDiagnostic(result)
+    }
+
+    ShowBatchDiagnosticSummary() {
+        if this.HasOwnProp("summaryCalls")
+            this.summaryCalls++
+        if !this.HasOwnProp("batchDiagnostic")
+            return
+        b := this.batchDiagnostic
+        sc := b.success.Length
+        wc := b.warning.Length
+        fc := b.failure.Length
+        kc := b.skipped.Length
+        if this.HasOwnProp("diagHeadless") && this.diagHeadless {
+            this.guiCalls := this.HasOwnProp("guiCalls") ? this.guiCalls : 0
+            return
+        }
+        msg := "批量解压完成`n成功: " sc "`n警告: " wc "`n失败: " fc "`n跳过: " kc
+        try TrayTip("SmartZip", msg)
+        catch {
+            MsgBox(msg, "SmartZip 批量摘要", "Iconi T5")
+        }
+    }
+
+    AppendRotatingDiagnosticLog(text) {
+        logPath := A_ScriptDir "\SmartZip-diagnostics.log"
+        if this.HasOwnProp("scriptDirOverride") && this.scriptDirOverride != ""
+            logPath := this.scriptDirOverride "\SmartZip-diagnostics.log"
+        this.RotateDiagnosticLogIfNeeded(logPath)
+        FileAppend(text "`r`n", logPath, "UTF-8")
+        if this.HasOwnProp("fileAppends")
+            this.fileAppends.Push({ path: logPath, encoding: "UTF-8", text: text })
+    }
+
+    RotateDiagnosticLogIfNeeded(logPath) {
+        if !FileExist(logPath) || FileGetSize(logPath) < 1048576
+            return
+        if FileExist(logPath ".2")
+            FileDelete(logPath ".2")
+        if FileExist(logPath ".1")
+            FileMove(logPath ".1", logPath ".2", 1)
+        FileMove(logPath, logPath ".1", 1)
+    }
+
+    ShowDiagnostic(result, isBatch := false) {
+        if isBatch {
+            this.RecordBatchDiagnostic(result)
+            return
+        }
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
+            return
+        this.WriteDiagnostic(result)
+        title := this.DiagnosticTitle(result)
+        reason := this.DiagnosticReason(result)
+        recommendation := this.DiagnosticRecommendation(result)
+        buttons := this.DiagnosticButtons(result)
+        archiveName := result.archivePath
+        SplitPath(result.archivePath, &archiveName)
+        partialPath := result.partialOutputDir
+
+        if this.HasOwnProp("diagHeadless") && this.diagHeadless {
+            this.DiagnosticShowGui(title, archiveName, reason, recommendation, partialPath, buttons)
+            return
+        }
+
+        g := Gui("+AlwaysOnTop +MinSize320x180", title)
+        g.SetFont("s10")
+        g.AddText("w400", "压缩包: " archiveName)
+        g.AddText("w400", "原因: " reason)
+        g.AddText("w400", "建议: " recommendation)
+        g.AddText("w400", "源包已保留")
+        if (partialPath != "")
+            g.AddText("w400", "部分输出: " partialPath)
+        btnHosts := []
+        for label in buttons {
+            b := g.AddButton("w180", label)
+            btnHosts.Push({ ctrl: b, label: label })
+        }
+        archivePath := result.archivePath
+        volumeFirst := result.HasOwnProp("volumeFirst") ? result.volumeFirst : ""
+        for item in btnHosts {
+            lbl := item.label
+            item.ctrl.OnEvent("Click", (*) => this.DiagnosticButtonAction(lbl, result, archivePath, volumeFirst, partialPath, g))
+        }
+        g.Show("AutoSize Center")
+    }
+
+    DiagnosticButtonAction(label, result, archivePath, volumeFirst, partialPath, g) {
+        switch label {
+            case "打开部分文件目录":
+                if (partialPath != "" && DirExist(partialPath))
+                    Run('explorer.exe "' partialPath '"')
+            case "重新输入密码":
+                try this.ResolveArchivePassword(archivePath, result)
+            case "定位首卷":
+                target := volumeFirst != "" ? volumeFirst : archivePath
+                if (target != "" && FileExist(target))
+                    Run('explorer.exe /select,"' target '"')
+                else {
+                    SplitPath(archivePath, , &dir)
+                    if DirExist(dir)
+                        Run('explorer.exe "' dir '"')
+                }
+            case "使用 7-Zip 打开":
+                if this.HasOwnProp("DiagnosticRun7zip")
+                    this.DiagnosticRun7zip(archivePath)
+                else
+                    Run('"' this.7zG '" "' archivePath '"')
+            case "复制脱敏诊断信息":
+                clip := this.FormatDiagnosticCopy(result)
+                if this.HasOwnProp("DiagnosticSetClipboard")
+                    this.DiagnosticSetClipboard(clip)
+                else
+                    A_Clipboard := clip
+            case "关闭":
+                try g.Destroy()
+        }
     }
 
     ; Full stdout+stderr capture for classification. Never kills the process on keyword match.
@@ -1598,7 +1907,7 @@ class SmartZip
             this.error := true
             cmdArgs := line
             if this.cmdLog
-                this.testLog .= '`n#####`n' cmdArgs '`n'
+                this.testLog .= '`n#####`n' RedactDiagnostic(cmdArgs) '`n'
 
             this.RunCmd(cmdArgs)
 
@@ -1608,7 +1917,7 @@ class SmartZip
                 return
 
             if this.cmdLog
-                this.testLog .= "[" what "] " line '`n'
+                this.testLog .= "[" what "] " RedactDiagnostic(line) '`n'
 
             ; for i in check.errorrContinueExp
             ;     if line ~= i && --check.errorrContinueExp[i] < 1
