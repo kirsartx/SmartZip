@@ -366,12 +366,12 @@ if (mode = "volumes" || mode = "all") {
     AssertFalse(g.selectedIsFirst, "part00_selected_not_first")
 
     ; --- review-fix: large suffix span (>4096) stays bounded; keep observed members; empty missing ---
-    siblings := ["huge.7z.001", "huge.7z.5000"]
-    g := DetectVolumeGroup(dir "\huge.7z.001", siblings)
+    siblings := ["huge.7z.0001", "huge.7z.5000"]
+    g := DetectVolumeGroup(dir "\huge.7z.0001", siblings)
     AssertTrue(g.isVolume, "large_suffix_is_volume")
     AssertEq(g.missingVolumes.Length, 0, "large_suffix_empty_missing")
     AssertEq(g.members.Length, 2, "large_suffix_retains_members")
-    AssertTrue(_ArrayHas(g.members, dir "\huge.7z.001"), "large_suffix_retains_001")
+    AssertTrue(_ArrayHas(g.members, dir "\huge.7z.0001"), "large_suffix_retains_001")
     AssertTrue(_ArrayHas(g.members, dir "\huge.7z.5000"), "large_suffix_retains_5000")
 
     ; --- review-fix: invalid sibling index 0 ignored (not treated as volume member) ---
@@ -382,6 +382,28 @@ if (mode = "volumes" || mode = "all") {
     AssertFalse(_ArrayHas(g.members, dir "\archive.7z.000"), "invalid_sibling_zero_not_member")
     AssertTrue(_ArrayHas(g.members, dir "\archive.7z.001"), "invalid_sibling_zero_keeps_001")
     AssertTrue(_ArrayHas(g.members, dir "\archive.7z.002"), "invalid_sibling_zero_keeps_002")
+
+    ; --- review-fix: mixed numeric widths are separate groups ---
+    siblings := ["mix.7z.001", "mix.7z.01"]
+    g := DetectVolumeGroup(dir "\mix.7z.001", siblings)
+    AssertTrue(g.isVolume, "mixed_numeric_width_is_volume")
+    AssertEq(g.members.Length, 1, "mixed_numeric_width_member_count")
+    AssertFalse(_ArrayHas(g.members, dir "\mix.7z.01"), "mixed_numeric_width_excludes_other_width")
+
+    ; --- review-fix: mixed part widths are separate groups ---
+    siblings := ["movie.part01.rar", "movie.part001.rar"]
+    g := DetectVolumeGroup(dir "\movie.part01.rar", siblings)
+    AssertTrue(g.isVolume, "mixed_part_width_is_volume")
+    AssertEq(g.members.Length, 1, "mixed_part_width_member_count")
+    AssertFalse(_ArrayHas(g.members, dir "\movie.part001.rar"), "mixed_part_width_excludes_other_width")
+
+    ; --- review-fix: inclusive range above 4096 does not create missing names ---
+    siblings := ["edge.0001", "edge.4097"]
+    g := DetectVolumeGroup(dir "\edge.0001", siblings)
+    AssertTrue(g.isVolume, "inclusive_bound_is_volume")
+    AssertEq(g.missingVolumes.Length, 0, "inclusive_bound_empty_missing")
+    AssertEq(g.members.Length, 2, "inclusive_bound_keeps_members")
+    AssertTrue(_ArrayHas(g.members, dir "\edge.4097"), "inclusive_bound_keeps_last")
 }
 
 summary := "SUMMARY passed=" passCount " failed=" failCount

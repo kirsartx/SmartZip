@@ -265,7 +265,13 @@ Describe 'ArchiveDiagnosticsVolumes' {
         'missing_middle_is_volume' = @(
             'invalid_sibling_zero_is_volume', 'invalid_sibling_zero_ignored',
             'invalid_sibling_zero_not_member', 'invalid_sibling_zero_keeps_001',
-            'invalid_sibling_zero_keeps_002'
+            'invalid_sibling_zero_keeps_002',
+            'mixed_numeric_width_is_volume', 'mixed_numeric_width_member_count',
+            'mixed_numeric_width_excludes_other_width',
+            'mixed_part_width_is_volume', 'mixed_part_width_member_count',
+            'mixed_part_width_excludes_other_width',
+            'inclusive_bound_is_volume', 'inclusive_bound_empty_missing',
+            'inclusive_bound_keeps_members', 'inclusive_bound_keeps_last'
         )
     }
 
