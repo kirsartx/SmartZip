@@ -200,19 +200,22 @@ DetectVolumeGroup(path, siblingNames) {
         base := mPart[1]
         width := StrLen(mPart[2])
         selIndex := Integer(mPart[2])
+        if (selIndex < 1)
+            return empty
         firstName := base ".part" Format("{:0" width "}", 1) ".rar"
         indices := []
         indexToName := Map()
         for n in names {
             if (RegExMatch(n, "i)^" _VolEscape(base) "\.part(\d+)\.rar$", &mm)) {
                 idx := Integer(mm[1])
-                indices.Push(idx)
-                indexToName[idx] := n
+                if (idx >= 1) {
+                    indices.Push(idx)
+                    indexToName[idx] := n
+                }
             }
         }
         if (!indexToName.Has(selIndex)) {
             indices.Push(selIndex)
-            indexToName[selIndex] := sel
         }
         return _VolBuildNumericGroup(dir, firstName, sel, selIndex, 1, indices, indexToName)
     }
@@ -240,22 +243,23 @@ DetectVolumeGroup(path, siblingNames) {
         }
         if (!indexToName.Has(selIndex)) {
             indices.Push(selIndex)
-            indexToName[selIndex] := sel
         }
         ; selectedIsFirst is never true for .rNN
         members := []
         missing := []
-        if (!nameSet.Has(StrLower(firstName)))
-            missing.Push(firstName)
         maxIndex := selIndex
         for idx in indices
             if (idx > maxIndex)
                 maxIndex := idx
-        idx := 1
-        while (idx <= maxIndex) {
-            if !indexToName.Has(idx)
-                missing.Push(base ".r" Format("{:0" width "}", idx - 1))
-            idx++
+        if ((maxIndex - 0) <= _VolMaxDerivationSpan()) {
+            if (!nameSet.Has(StrLower(firstName)))
+                missing.Push(firstName)
+            idx := 1
+            while (idx <= maxIndex) {
+                if !indexToName.Has(idx)
+                    missing.Push(base ".r" Format("{:0" width "}", idx - 1))
+                idx++
+            }
         }
         ; present members sorted: base (0) then r00,r01,...
         if (indexToName.Has(0))
@@ -279,23 +283,9 @@ DetectVolumeGroup(path, siblingNames) {
         }
         for pair in sortedExtra
             members.Push(dir "\" pair[2])
-        if (!nameSet.Has(selLower) && sel != "")
-        {
-            ; ensure selected path appears if not in siblings list
-            foundSel := false
-            for mem in members {
-                SplitPath(mem, &mn)
-                if (StrLower(mn) = selLower) {
-                    foundSel := true
-                    break
-                }
-            }
-            if (!foundSel)
-                members.Push(dir "\" sel)
-        }
         return {
             isVolume: true,
-            firstPath: dir "\" firstName,
+            firstPath: dir "\" (nameSet.Has(StrLower(firstName)) ? nameSet[StrLower(firstName)] : firstName),
             members: members,
             missingVolumes: missing,
             selectedIsFirst: false
@@ -317,8 +307,6 @@ DetectVolumeGroup(path, siblingNames) {
             members := []
             if (nameSet.Has(StrLower(firstName)))
                 members.Push(dir "\" nameSet[StrLower(firstName)])
-            else
-                members.Push(dir "\" firstName)
             sortedExtra := []
             for n in names {
                 if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm))
@@ -342,31 +330,20 @@ DetectVolumeGroup(path, siblingNames) {
                     maxR := pair[1]
             }
             missing := []
-            if (!nameSet.Has(StrLower(firstName)))
-                missing.Push(firstName)
-            if (maxR >= 0) {
+            if ((maxR + 1) <= _VolMaxDerivationSpan()) {
+                if (!nameSet.Has(StrLower(firstName)))
+                    missing.Push(firstName)
                 r := 0
                 while (r <= maxR) {
                     rn := base ".r" Format("{:02}", r)
-                    ; keep original width if siblings use 2 digits; Format 02 matches r00 style
-                    if (!nameSet.Has(StrLower(rn))) {
-                        ; also try without forcing width from observed sibling
-                        foundWidth := false
-                        for n in names {
-                            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm) && Integer(mm[1]) = r) {
-                                foundWidth := true
-                                break
-                            }
-                        }
-                        if (!foundWidth)
-                            missing.Push(base ".r" Format("{:02}", r))
-                    }
+                    if (!nameSet.Has(StrLower(rn)))
+                        missing.Push(rn)
                     r++
                 }
             }
             return {
                 isVolume: true,
-                firstPath: dir "\" firstName,
+                firstPath: dir "\" (nameSet.Has(StrLower(firstName)) ? nameSet[StrLower(firstName)] : firstName),
                 members: members,
                 missingVolumes: missing,
                 selectedIsFirst: true
@@ -380,19 +357,22 @@ DetectVolumeGroup(path, siblingNames) {
         digits := mNum[2]
         width := StrLen(digits)
         selIndex := Integer(digits)
+        if (selIndex < 1)
+            return empty
         firstName := stem "." Format("{:0" width "}", 1)
         indices := []
         indexToName := Map()
         for n in names {
-            if (RegExMatch(n, "i)^" _VolEscape(stem) "\.(\d+)$", &mm) && StrLen(mm[1]) = width) {
+            if (RegExMatch(n, "i)^" _VolEscape(stem) "\.(\d+)$", &mm)) {
                 idx := Integer(mm[1])
-                indices.Push(idx)
-                indexToName[idx] := n
+                if (idx >= 1) {
+                    indices.Push(idx)
+                    indexToName[idx] := n
+                }
             }
         }
         if (!indexToName.Has(selIndex)) {
             indices.Push(selIndex)
-            indexToName[selIndex] := sel
         }
         return _VolBuildNumericGroup(dir, firstName, sel, selIndex, 1, indices, indexToName)
     }
@@ -412,11 +392,12 @@ _VolEscape(s) {
     return out
 }
 
-_VolBuildNumericGroup(dir, firstName, selName, selIndex, firstIndex, indices, indexToName) {
-    nameSet := Map()
-    for idx, n in indexToName
-        nameSet[StrLower(n)] := n
+_VolMaxDerivationSpan() {
+    ; Safe bound: never allocate a missing-volume list for more than 4096 indices.
+    return 4096
+}
 
+_VolBuildNumericGroup(dir, firstName, selName, selIndex, firstIndex, indices, indexToName) {
     ; unique sort indices
     uniq := []
     seen := Map()
@@ -462,22 +443,34 @@ _VolBuildNumericGroup(dir, firstName, selName, selIndex, firstIndex, indices, in
 
     members := []
     missing := []
+    firstOutputName := indexToName.Has(firstIndex) ? indexToName[firstIndex] : firstName
+    if ((maxIndex - firstIndex) > _VolMaxDerivationSpan()) {
+        for idx in uniq {
+            if (indexToName.Has(idx))
+                members.Push(dir "\" indexToName[idx])
+        }
+        return {
+            isVolume: true,
+            firstPath: dir "\" firstOutputName,
+            members: members,
+            missingVolumes: missing,
+            selectedIsFirst: (selIndex = firstIndex)
+        }
+    }
     idx := firstIndex
     while (idx <= maxIndex) {
         nm := stem (partSuffix = "" ? "." : "") Format("{:0" width "}", idx) partSuffix
         if (indexToName.Has(idx)) {
             members.Push(dir "\" indexToName[idx])
-        } else if (idx != selIndex) {
-            missing.Push(nm)
         } else {
-            members.Push(dir "\" selName)
+            missing.Push(nm)
         }
         idx++
     }
 
     return {
         isVolume: true,
-        firstPath: dir "\" firstName,
+        firstPath: dir "\" firstOutputName,
         members: members,
         missingVolumes: missing,
         selectedIsFirst: (selIndex = firstIndex)

@@ -250,12 +250,13 @@ if (mode = "volumes" || mode = "all") {
     AssertTrue(g.isVolume, "part10_rar_is_volume")
     AssertFalse(g.selectedIsFirst, "part10_rar_not_first")
     AssertEq(g.firstPath, dir "\movie.part01.rar", "part10_rar_redirects_to_part01")
-    ; Contiguous range 01..10 with only 01 and 10 present → missing 02..09
-    AssertTrue(g.missingVolumes.Length >= 8, "part10_rar_reports_gap_missing_count")
+    ; Contiguous range 01..10 with only 01 and 10 present → missing 02..09 exactly (not past 10)
+    AssertEq(g.missingVolumes.Length, 8, "part10_rar_reports_gap_missing_count")
     AssertTrue(_ArrayHas(g.missingVolumes, "movie.part02.rar"), "part10_rar_missing_includes_part02")
     AssertTrue(_ArrayHas(g.missingVolumes, "movie.part09.rar"), "part10_rar_missing_includes_part09")
     AssertFalse(_ArrayHas(g.missingVolumes, "movie.part01.rar"), "part10_rar_missing_excludes_present_first")
     AssertFalse(_ArrayHas(g.missingVolumes, "movie.part10.rar"), "part10_rar_missing_excludes_selected")
+    AssertFalse(_ArrayHas(g.missingVolumes, "movie.part11.rar"), "part10_rar_missing_excludes_part11")
 
     ; --- name.rar + name.r00 / name.r01 ---
     siblings := ["backup.rar", "backup.r00", "backup.r01"]
@@ -319,6 +320,68 @@ if (mode = "volumes" || mode = "all") {
     AssertEq(g.firstPath, dir "\set.rar", "orphan_r00_derives_rar_first")
     AssertTrue(_ArrayHas(g.missingVolumes, "set.rar"), "orphan_r00_missing_base_rar")
     AssertFalse(_ArrayHas(g.missingVolumes, "set.r99"), "orphan_r00_does_not_fabricate_r99")
+
+    ; --- review-fix: absent selected path is not a member ---
+    ; Select archive.7z.002 when only 001 is present among siblings → isVolume, first derived,
+    ; members only the present sibling; selected 002 must not appear as a member.
+    siblings := ["archive.7z.001"]
+    g := DetectVolumeGroup(dir "\archive.7z.002", siblings)
+    AssertTrue(g.isVolume, "absent_selected_is_volume")
+    AssertEq(g.firstPath, dir "\archive.7z.001", "absent_selected_first_path")
+    AssertEq(g.members.Length, 1, "absent_selected_member_count")
+    AssertEq(g.members[1], dir "\archive.7z.001", "absent_selected_member_only_present")
+    AssertFalse(_ArrayHas(g.members, dir "\archive.7z.002"), "absent_selected_not_member")
+    AssertTrue(_ArrayHas(g.missingVolumes, "archive.7z.002"), "absent_selected_listed_missing")
+
+    ; --- review-fix: firstPath preserves observed sibling casing ---
+    siblings := ["Archive.7z.001", "archive.7z.002"]
+    g := DetectVolumeGroup(dir "\archive.7z.002", siblings)
+    AssertTrue(g.isVolume, "present_first_sibling_casing_is_volume")
+    AssertEq(g.firstPath, dir "\Archive.7z.001", "present_first_sibling_casing")
+
+    ; --- review-fix: .000 is not a valid volume index ---
+    siblings := ["file.000"]
+    g := DetectVolumeGroup(dir "\file.000", siblings)
+    AssertFalse(g.isVolume, "numeric_000_not_volume")
+    AssertEq(g.firstPath, "", "numeric_000_empty_first")
+    AssertEq(g.members.Length, 0, "numeric_000_empty_members")
+    AssertEq(g.missingVolumes.Length, 0, "numeric_000_empty_missing")
+    AssertFalse(g.selectedIsFirst, "numeric_000_selected_not_first")
+
+    siblings := ["file.7z.000"]
+    g := DetectVolumeGroup(dir "\file.7z.000", siblings)
+    AssertFalse(g.isVolume, "numeric_7z_000_not_volume")
+    AssertEq(g.firstPath, "", "numeric_7z_000_empty_first")
+    AssertEq(g.members.Length, 0, "numeric_7z_000_empty_members")
+    AssertEq(g.missingVolumes.Length, 0, "numeric_7z_000_empty_missing")
+    AssertFalse(g.selectedIsFirst, "numeric_7z_000_selected_not_first")
+
+    ; --- review-fix: .part00.rar is not a volume ---
+    siblings := ["name.part00.rar"]
+    g := DetectVolumeGroup(dir "\name.part00.rar", siblings)
+    AssertFalse(g.isVolume, "part00_not_volume")
+    AssertEq(g.firstPath, "", "part00_empty_first")
+    AssertEq(g.members.Length, 0, "part00_empty_members")
+    AssertEq(g.missingVolumes.Length, 0, "part00_empty_missing")
+    AssertFalse(g.selectedIsFirst, "part00_selected_not_first")
+
+    ; --- review-fix: large suffix span (>4096) stays bounded; keep observed members; empty missing ---
+    siblings := ["huge.7z.001", "huge.7z.5000"]
+    g := DetectVolumeGroup(dir "\huge.7z.001", siblings)
+    AssertTrue(g.isVolume, "large_suffix_is_volume")
+    AssertEq(g.missingVolumes.Length, 0, "large_suffix_empty_missing")
+    AssertEq(g.members.Length, 2, "large_suffix_retains_members")
+    AssertTrue(_ArrayHas(g.members, dir "\huge.7z.001"), "large_suffix_retains_001")
+    AssertTrue(_ArrayHas(g.members, dir "\huge.7z.5000"), "large_suffix_retains_5000")
+
+    ; --- review-fix: invalid sibling index 0 ignored (not treated as volume member) ---
+    siblings := ["archive.7z.000", "archive.7z.001", "archive.7z.002"]
+    g := DetectVolumeGroup(dir "\archive.7z.001", siblings)
+    AssertTrue(g.isVolume, "invalid_sibling_zero_is_volume")
+    AssertEq(g.members.Length, 2, "invalid_sibling_zero_ignored")
+    AssertFalse(_ArrayHas(g.members, dir "\archive.7z.000"), "invalid_sibling_zero_not_member")
+    AssertTrue(_ArrayHas(g.members, dir "\archive.7z.001"), "invalid_sibling_zero_keeps_001")
+    AssertTrue(_ArrayHas(g.members, dir "\archive.7z.002"), "invalid_sibling_zero_keeps_002")
 }
 
 summary := "SUMMARY passed=" passCount " failed=" failCount
