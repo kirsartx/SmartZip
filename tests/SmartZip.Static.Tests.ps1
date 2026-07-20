@@ -1,4 +1,4 @@
-﻿#requires -Version 5.0
+#requires -Version 5.0
 <#
 .SYNOPSIS
   Static regression tests for SmartZip.ahk correctness hotfixes (no AutoHotkey runtime).
@@ -59,7 +59,19 @@ $script:UnzipBody = Get-SourceSlice -Source $script:SmartZipSource `
 $script:CreateZipBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    CreateZip()" -EndMarker "`n    Gui()"
 $script:IsArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
-    -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    RunCmd("
+    -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    IsNestedArchiveCandidate("
+if ([string]::IsNullOrEmpty($script:IsArchiveBody)) {
+    $script:IsArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    ProbeArchive("
+}
+if ([string]::IsNullOrEmpty($script:IsArchiveBody)) {
+    $script:IsArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    RunCmdCapture("
+}
+if ([string]::IsNullOrEmpty($script:IsArchiveBody)) {
+    $script:IsArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    IsArchive(ext)" -EndMarker "`n    RunCmd("
+}
 $script:InitBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    Init(argsArr)" -EndMarker "`n    Exec("
 $script:OpenZipBody = Get-SourceSlice -Source $script:SmartZipSource `
@@ -155,10 +167,13 @@ Describe 'IsArchiveExt' {
         $script:IsArchiveBody | Should Match 'IsArchive\s*\(\s*ext\s*\)'
     }
 
-    It 'returns true when extension is empty' {
+    It 'returns false when extension is empty' {
         $ok = Test-Regex -Text $script:IsArchiveBody -Pattern `
-            '(?s)if\s*!ext\s+return\s+true'
+            '(?s)if\s*!ext\s+return\s+false'
         $ok | Should Be $true
+        $bad = Test-Regex -Text $script:IsArchiveBody -Pattern `
+            '(?s)if\s*!ext\s+return\s+true'
+        $bad | Should Be $false
     }
 
     It 'uses this.ext.Has(ext) for exact map lookup' {
@@ -873,5 +888,143 @@ Describe 'ExtractionLifecycleSafety' {
         # Field may remain until Task 6 deprecates UI; must not appear in extract/finalize decision
         $script:ExtractArchiveToTempBody | Should Not Match 'successPercent|succesSpercent'
         $script:FinalizeExtractionBody | Should Not Match 'successPercent|succesSpercent'
+    }
+}
+
+$script:IsNestedArchiveCandidateBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    IsNestedArchiveCandidate(" -EndMarker "`n    ProbeArchive("
+if ([string]::IsNullOrEmpty($script:IsNestedArchiveCandidateBody)) {
+    $script:IsNestedArchiveCandidateBody = Get-SourceSlice -Source $script:SmartZipSource `
+        -StartMarker "`n    IsNestedArchiveCandidate(" -EndMarker "`n    RunCmdCapture("
+}
+$script:UnZipNestingBody = ""
+if ($script:UnzipBody -match '(?s)(UnZipNesting\s*\([^\)]*\)\s*\{.*?\n        \})') {
+    $script:UnZipNestingBody = $matches[1]
+}
+$script:IniCreateBody = ""
+if ($script:SmartZipSource -match '(?s)(IniCreate\s*\(\s*\)\s*\{.*\n\})') {
+    $script:IniCreateBody = $matches[1]
+}
+$script:MigrateDeprecatedExtExpBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`nMigrateDeprecatedExtExp()" -EndMarker "`nIniCreate()"
+$script:SettingsGuiRegion = ""
+# Settings live in Set() / settings GUI block; use whole source for control assertions
+$script:SettingsGuiRegion = $script:SmartZipSource
+
+Describe 'NestingProbeAndMigrationSafety' {
+
+    It 'IsNestedArchiveCandidate method exists after IsArchive' {
+        [string]::IsNullOrEmpty($script:IsNestedArchiveCandidateBody) | Should Be $false
+        $a = $script:SmartZipSource.IndexOf("`n    IsArchive(ext)")
+        $c = $script:SmartZipSource.IndexOf("`n    IsNestedArchiveCandidate(")
+        ($a -ge 0 -and $c -gt $a) | Should Be $true
+    }
+
+    It 'IsArchive empty extension returns false not true' {
+        $script:IsArchiveBody | Should Match '(?s)if\s*!ext\s+return\s+false'
+        $script:IsArchiveBody | Should Not Match '(?s)if\s*!ext\s+return\s+true'
+    }
+
+    It 'IsArchive still uses exact ext map and extExp regex only as hints' {
+        $script:IsArchiveBody | Should Match 'this\.ext\.Has\(\s*ext\s*\)'
+        $script:IsArchiveBody | Should Match 'this\.extExp'
+        $script:IsArchiveBody | Should Match 'ext\s*~='
+    }
+
+    It 'IsNestedArchiveCandidate uses IsArchive and DetectVolumeGroup' {
+        $b = $script:IsNestedArchiveCandidateBody
+        $b | Should Match 'IsArchive\s*\('
+        $b | Should Match 'DetectVolumeGroup\s*\('
+    }
+
+    It 'UnZipNesting gates on candidate then ProbeArchive before nested Unzip' {
+        $b = $script:UnZipNestingBody
+        [string]::IsNullOrEmpty($b) | Should Be $false
+        ($b -match 'IsNestedArchiveCandidate\s*\(|IsArchive\s*\(') | Should Be $true
+        $b | Should Match 'ProbeArchive\s*\('
+        $b | Should Match 'Unzip\s*\('
+        # ProbeArchive must appear before nested Unzip call in the function body
+        $p = $b.IndexOf('ProbeArchive')
+        $u = $b.LastIndexOf('Unzip(')
+        ($p -ge 0 -and $u -gt $p) | Should Be $true
+    }
+
+    It 'UnZipNesting does not legacy-delete on time size or bare exitCode success' {
+        $b = $script:UnZipNestingBody
+        $b | Should Not Match 'FileGetTime\s*\(\s*path\s*\)\s*,\s*sizeSave\s*:=\s*FileGetSize'
+        $b | Should Not Match 'FileGetTime\s*\(\s*path\s*\)\s*=\s*timeSave'
+        $b | Should Not Match '(?s)if\s*!this\.exitCode\s*&&\s*part\s*='
+    }
+
+    It 'UnZipNesting volume path never RecycleItem deletes volumes' {
+        $b = $script:UnZipNestingBody
+        # Must consult DetectVolumeGroup or explicit volume guard; must not RecycleItem volume members
+        ($b -match 'DetectVolumeGroup\s*\(|isVolume|part\s*=') | Should Be $true
+        # No unconditional RecycleItem(path) after nested unzip without OK/isCleanSuccess gate in this helper
+        $bad = Test-Regex -Text $b -Pattern 'RecycleItem\s*\(\s*path\s*,\s*A_LineNumber\s*\)\s*$'
+        # UnZipNesting itself performs no source RecycleItem (Task 5 zipx owns clean-OK recycle).
+        $b | Should Not Match 'RecycleItem\s*\(\s*path'
+    }
+
+    It 'zipx forces TestArchive before top-level or nested source handling even if test is 0' {
+        $u = $script:UnzipBody
+        $u | Should Match 'TestArchive\s*\('
+        $u | Should Match 'this\.test'
+        $u | Should Match 'delSource|delWhenHasPass'
+        $u | Should Match 'nestedMayRecycle'
+        # must not skip test solely because test flag is false when delete is enabled
+        ($u -match 'forceTest|this\.test\s*\|\||mayHandleSource|mayDel') | Should Be $true
+    }
+
+    It 'Unzip no longer assigns succesSpercent from ini.successPercent' {
+        $script:UnzipBody | Should Not Match 'succesSpercent\s*:=\s*ini\.successPercent'
+        $script:UnzipBody | Should Not Match 'this\.succesSpercent\s*:=\s*ini\.successPercent'
+    }
+
+    It 'successPercent key remains in ini map and new-install default still written' {
+        $script:SmartZipSource | Should Match 'successPercent\s*:'
+        $script:IniCreateBody | Should Match 'setWrite\s*\(\s*"successPercent"'
+    }
+
+    It 'settings UI removes 判断解压成功百分比 control but keeps test checkbox' {
+        $script:SettingsGuiRegion | Should Not Match '判断解压成功百分比'
+        $script:SettingsGuiRegion | Should Not Match 'GuiUpDownEdit\s*\(\s*"successPercent"'
+        $script:SettingsGuiRegion | Should Match 'GuiCheckBox\s*\(\s*"test"'
+    }
+
+    It 'migration removes only exact extExp values zi 7 z and preserves digit regex default' {
+        $b = $script:IniCreateBody
+        $m = $script:MigrateDeprecatedExtExpBody
+        [string]::IsNullOrEmpty($b) | Should Be $false
+        [string]::IsNullOrEmpty($m) | Should Be $false
+        # Must still seed ^\d+$ for new installs
+        $b | Should Match '\\\^\\d\+\$|"\^\\d\+\$"'
+        # Must not seed broad zi/7/z as new defaults
+        $b | Should Not Match 'Write\s*\(\s*"zi"\s*,\s*2\s*,\s*"extExp"\s*\)'
+        $b | Should Not Match 'Write\s*\(\s*"7"\s*,\s*3\s*,\s*"extExp"\s*\)'
+        $b | Should Not Match 'Write\s*\(\s*"z"\s*,\s*4\s*,\s*"extExp"\s*\)'
+        # IniCreate invokes the script-level migration; its body filters exact tokens.
+        $b | Should Match 'MigrateDeprecatedExtExp\s*\('
+        $m | Should Match 'var\s*==\s*"zi"'
+        $m | Should Match 'var\s*==\s*"7"'
+        $m | Should Match 'var\s*==\s*"z"'
+    }
+
+    It 'migration does not rewrite unrelated INI sections wholesale' {
+        $b = $script:MigrateDeprecatedExtExpBody
+        # Forbid wiping entire password/ext sections blindly; migration should target extExp indices only
+        $b | Should Not Match 'IniDelete\s*\(\s*this\.path\s*,\s*"password"\s*\)'
+        $b | Should Not Match 'FileDelete\s*\(\s*ini\.path\s*\)'
+        $b | Should Match 'extExp'
+    }
+
+    It 'nested clean OK source recycle remains only in zipx lifecycle and is never permanent' {
+        $u = $script:UnzipBody
+        $u | Should Match 'loopPath'
+        $u | Should Match 'isCleanSuccess|ArchiveStatus\.OK'
+        # Warning must not authorize nested handling; source paths never use delete:=true.
+        $u | Should Match 'OK_WITH_WARNING'
+        $u | Should Match 'nestedMayRecycle\s*:=\s*false'
+        $u | Should Not Match 'RecycleItem\s*\(\s*path\s*,[^\n]*true'
     }
 }

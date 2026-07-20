@@ -233,7 +233,6 @@ class SmartZip
             this.delWhenHasPass := ini.delWhenHasPass
             this.nesting := ini.nesting
             this.nestingMuilt := ini.nestingMuilt
-            this.succesSpercent := ini.successPercent
             this.autoRemovePass := ini.autoRemovePass
             if (targetDir := ini.targetDir)
                 targetDir := targetDir ~= "i)^[a-z]:\\$" ? targetDir : RTrim(targetDir, "\")
@@ -467,12 +466,36 @@ class SmartZip
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
         UnZipNesting(path, ext)
         {
-            if !this.IsArchive(ext) || !IsPart(path)
+            if !this.IsNestedArchiveCandidate(path, ext)
                 return
+
+            SplitPath(path, &name, &dir)
+            siblingNames := []
+            if DirExist(dir) {
+                loop files dir "\*.*", "F"
+                    siblingNames.Push(A_LoopFileName)
+            }
+            vol := DetectVolumeGroup(path, siblingNames)
+            if (vol.isVolume && !vol.selectedIsFirst)
+                return  ; never re-enter non-first volumes; volumes never deleted here
+
+            probe := this.ProbeArchive(path)
+            switch probe.status
+            {
+                case ArchiveStatus.OK, ArchiveStatus.OK_WITH_WARNING
+                    , ArchiveStatus.NEED_PASSWORD, ArchiveStatus.WRONG_PASSWORD:
+                {
+                    ; real/possible archive → nested Unzip (password + extract owned by zipx)
+                }
+                default:
+                    return  ; candidate hint only; ProbeArchive rejected nested extract
+            }
 
             this.exitCode := -1
             this.Unzip(path)
             this.Loging("解压嵌套 <--> " path, A_LineNumber)
+            ; Nested source recycle only after nested clean OK — Task 5 zipx.
+            ; Never handle it here on warning/failure/volume, and never permanently delete a source.
         }
 
         ; 解压后处理
@@ -1138,7 +1161,7 @@ class SmartZip
         ext := StrLower(ext)
 
         if !ext
-            return true
+            return false
 
         if this.ext.Has(ext)
             return true
@@ -1148,6 +1171,21 @@ class SmartZip
                 return true
 
         return false
+    }
+
+    IsNestedArchiveCandidate(path, ext)
+    {
+        if this.IsArchive(ext)
+            return true
+
+        SplitPath(path, &name, &dir)
+        siblingNames := []
+        if DirExist(dir) {
+            loop files dir "\*.*", "F"
+                siblingNames.Push(A_LoopFileName)
+        }
+        g := DetectVolumeGroup(path, siblingNames)
+        return g.isVolume
     }
 
     ProbeArchive(path) {
@@ -1721,7 +1759,6 @@ Setting()
     lineGeneration("xs")
     GuiUpDownEdit("logLevel", "日志等级", ini.logLevel, 5, "关闭0/删除1/重命名2/命令行错误3/命令行正确4/其他5")
     GuiUpDownEdit("hideRunSize", "隐藏运行", ini.hideRunSize, , "源文件大小(单位 MB)小于此值的会隐藏运行", "xs")
-    GuiUpDownEdit("successPercent", "判断解压成功百分比", ini.successPercent, 100, "部分文件可能解压后大小会小于源文件`n只要解压到一定百分比就判断解压成功", "xs")
     set.AddText("xs")
     if FileExist(A_ScriptDir "\log.txt")
         set.AddButton("", "查看日志").OnEvent("Click", (*) => Run(A_ScriptDir "\log.txt"))
@@ -2210,6 +2247,38 @@ class ini
 
 RelativePath(str) => StrReplace(str, "%SmartZipDir%", A_ScriptDir)
 
+MigrateDeprecatedExtExp()
+{
+    kept := []
+    idx := 0
+    loop
+    {
+        if !(var := ini.Read(A_Index, , "extExp"))
+            break
+        idx := A_Index
+        if (var == "zi" || var == "7" || var == "z")
+            continue
+        kept.Push(var)
+    }
+    if !idx
+        return
+    hadDeprecated := false
+    loop idx
+    {
+        var := ini.Read(A_Index, , "extExp")
+        if (var == "zi" || var == "7" || var == "z") {
+            hadDeprecated := true
+            break
+        }
+    }
+    if !hadDeprecated
+        return
+    loop idx
+        ini.Delete("extExp", A_Index)
+    for i, rule in kept
+        ini.Write(rule, i, "extExp")
+}
+
 IniCreate()
 {
     iniExist := FileExist(ini.path)
@@ -2255,9 +2324,6 @@ IniCreate()
         ini.Write("tar", 9)
 
         ini.Write("^\d+$", 1, "extExp")
-        ini.Write("zi", 2)
-        ini.Write("7", 3)
-        ini.Write("z", 4)
 
         ini.Write("iso", 1, "extForOpen")
         ini.Write("apk", 2)
@@ -2304,6 +2370,8 @@ IniCreate()
 
         ini.Write("\d*-\d*-\d* *\d*:\d*:\d* *\d* *\d* *(\d*) files(, (\d*) folders)?<--->1", 1, "openZipCheckSuccessExp")	;多少个文件多少个文件夹则可能是压缩文件
     }
+
+    MigrateDeprecatedExtExp()
 
     if VersionsCompare(buildVersion)
         ini.setWrite("version", buildVersion)
