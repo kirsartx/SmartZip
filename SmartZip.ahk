@@ -31,6 +31,7 @@ else
     Setting
 
 #Include lib\ArchiveDiagnostics.ahk
+#Include *i tests\IntegrationTestHook.ahk
 class SmartZip
 {
     __New(sevenZipDir)
@@ -443,6 +444,11 @@ class SmartZip
             if (forceTest) {
                 tr := this.TestArchive(path, resolved.passwordUsed)
                 if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
+                    mayHandleSource := false
+                    nestedMayRecycle := false
+                } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
+                    ; Still extract so FinalizeExtraction can isolate salvageable partial output.
+                    this.error := true
                     mayHandleSource := false
                     nestedMayRecycle := false
                 } else if (tr.status != ArchiveStatus.OK) {
@@ -1203,7 +1209,9 @@ class SmartZip
     }
 
     ProbeArchive(path) {
-        cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 "' path '"'
+        ; Always pass empty -p so 7-Zip ZS does not block on encrypted-header password prompts
+        ; when RunCmdCapture has no stdin (CREATE_NO_WINDOW). Matches TestArchive empty-password shape.
+        cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' path '"'
         if this.cmdLog
             this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
         cap := this.RunCmdCapture(cmd, "UTF-8")
@@ -1317,6 +1325,8 @@ class SmartZip
     }
 
     ShowPasswordDialog(path) {
+        if IsSet(SmartZipTest_PasswordDialog)
+            return SmartZipTest_PasswordDialog(path)
         result := { action: "cancel", password: "" }
         SplitPath(path, &name)
         g := Gui("+AlwaysOnTop -MinimizeBox", "SmartZip 需要密码")
@@ -1374,11 +1384,11 @@ class SmartZip
 
         extractExit := this.exitCode
         result := ""
-        if (extractExit = 0) {
-            result := Classify7zResult("extract", 0, "", path)
-        } else if (extractExit = 255) {
+        if (extractExit = 255) {
             result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, path)
         } else {
+            ; Always re-test with capture: 7-Zip ZS may return exit 0 with trailing-data
+            ; WARNINGS, and non-zero exits need full output for DATA_CORRUPT / etc.
             cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
             cap := this.RunCmdCapture(cmd, "UTF-8")
             if this.cmdLog
@@ -1467,11 +1477,15 @@ class SmartZip
             text .= "error: " e "`r`n"
         if (result.output != "")
             text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        ; Password/secret redaction first (default keeps full paths for internal use).
         text := RedactDiagnostic(text)
         if (result.partialOutputDir != "" && DirExist(result.partialOutputDir)) {
             diagPath := result.partialOutputDir "\SmartZip-诊断.txt"
             try FileDelete(diagPath)
-            FileAppend(text, diagPath, "UTF-8")
+            ; Partial-dir SmartZip-诊断.txt is portable copy-safe evidence: basename only.
+            ; Full-path local rotating logs use FormatDiagnosticLogEntry separately (Task 7).
+            copySafeText := RedactDiagnostic(text, false)
+            FileAppend(copySafeText, diagPath, "UTF-8")
         }
         ; Rotating log only for warning or hard failure (not OK, not CANCELLED)
         if (result.status = ArchiveStatus.OK_WITH_WARNING
@@ -1694,6 +1708,8 @@ class SmartZip
     }
 
     ShowDiagnostic(result, isBatch := false) {
+        if IsSet(SmartZipTest_OnResult)
+            SmartZipTest_OnResult(result)
         if isBatch {
             this.RecordBatchDiagnostic(result)
             return
@@ -1708,6 +1724,9 @@ class SmartZip
         archiveName := result.archivePath
         SplitPath(result.archivePath, &archiveName)
         partialPath := result.partialOutputDir
+
+        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui
+            return
 
         if this.HasOwnProp("diagHeadless") && this.diagHeadless {
             this.DiagnosticShowGui(title, archiveName, reason, recommendation, partialPath, buttons)
@@ -1737,6 +1756,11 @@ class SmartZip
     }
 
     DiagnosticButtonAction(label, result, archivePath, volumeFirst, partialPath, g) {
+        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
+            if (label = "关闭")
+                try g.Destroy()
+            return
+        }
         switch label {
             case "打开部分文件目录":
                 if (partialPath != "" && DirExist(partialPath))
