@@ -99,7 +99,11 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
             hasDataCorrupt := true
             isErr := true
         }
-        if (InStr(trimmed, "Cannot open the file as archive") || InStr(trimmed, "Can not open the file as archive")) {
+        ; 7-Zip classic: "Cannot open the file as archive"
+        ; 7-Zip ZS: "Cannot open the file as [7z] archive" / "Is not archive" / "Can't open as archive"
+        if (InStr(trimmed, "Cannot open the file as archive") || InStr(trimmed, "Can not open the file as archive")
+            || InStr(trimmed, "Is not archive") || InStr(trimmed, "Can't open as archive")
+            || trimmed ~= "i)Cannot open the file as \[.+\] archive") {
             hasNotArchive := true
             isErr := true
         }

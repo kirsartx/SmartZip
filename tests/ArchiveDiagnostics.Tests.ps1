@@ -58,6 +58,67 @@ function Invoke-ArchiveHarness {
     }
 }
 
+# Invoke Classify7zResult once and return status|passwordUsed|errorLineCount for ZS regressions.
+function Invoke-Classify7zProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Output,
+        [int]$ExitCode = 2,
+        [string]$Stage = 'probe',
+        [string]$ArchivePath = 'C:\tmp\fake.7z'
+    )
+    if (-not (Test-Path -LiteralPath $script:AhkExe)) {
+        throw "AutoHotkey not found: $($script:AhkExe)"
+    }
+    $id = [guid]::NewGuid().ToString('N')
+    $outFile = Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.out.txt" -f $id)
+    $errFile = Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.err.txt" -f $id)
+    $scriptFile = Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.ahk" -f $id)
+    $libEsc = $script:LibPath -replace '\\', '\\'
+    $outEsc = $outFile -replace '\\', '\\'
+    $archEsc = $ArchivePath -replace '\\', '\\'
+    $stageEsc = $Stage -replace '"', '``"'
+    # Embed output as AHK continuation via Chr codes to avoid quoting pitfalls.
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Output)
+    $chrParts = foreach ($b in $bytes) { "Chr($b)" }
+    $outputExpr = if ($chrParts.Count -gt 0) { $chrParts -join ' . ' } else { '""' }
+    $ahk = @"
+#Requires AutoHotkey v2.0
+#SingleInstance Off
+FileEncoding "UTF-8"
+#Include $libEsc
+outputText := $outputExpr
+r := Classify7zResult("$stageEsc", $ExitCode, outputText, "$archEsc")
+payload := r.status . "|" . r.passwordUsed . "|" . r.errorLines.Length
+FileAppend payload, "$outEsc", "UTF-8"
+"@
+    try {
+        Set-Content -LiteralPath $scriptFile -Value $ahk -Encoding UTF8
+        $p = Start-Process -FilePath $script:AhkExe -ArgumentList @('/ErrorStdOut', $scriptFile) `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput (Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.stdout.txt" -f $id)) `
+            -RedirectStandardError $errFile
+        if ($p.ExitCode -ne 0) {
+            $errText = if (Test-Path -LiteralPath $errFile) { Get-Content -LiteralPath $errFile -Raw } else { '' }
+            throw "Classify probe AHK exit=$($p.ExitCode) err=$errText"
+        }
+        if (-not (Test-Path -LiteralPath $outFile)) {
+            throw "Classify probe produced no output file"
+        }
+        $raw = (Get-Content -LiteralPath $outFile -Encoding UTF8 -Raw).Trim()
+        $parts = $raw -split '\|', 3
+        return [pscustomobject]@{
+            Status         = $parts[0]
+            PasswordUsed   = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+            ErrorLineCount = if ($parts.Count -gt 2) { [int]$parts[2] } else { 0 }
+            Raw            = $raw
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $scriptFile, $outFile, $errFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'ArchiveDiagnosticsFiles' {
     It 'lib/ArchiveDiagnostics.ahk exists' {
         $script:LibPath | Should Exist
@@ -151,10 +212,80 @@ Describe 'ArchiveDiagnosticsClassify' {
         'classifier_never_sets_password_used'
     )
 
+    # Keep the canonical 140 ArchiveDiagnostics Its while folding real 7-Zip ZS
+    # not-archive strings (discovered via C:\Tool\7-Zip-Zstandard\7z.exe) into them.
+    $zsNotArchiveExtras = @{
+        'not_archive' = @(
+            @{
+                Label    = 'zs_bracket_format'
+                Output   = "Open ERROR: Cannot open the file as [7z] archive`n"
+                Expected = 'NOT_ARCHIVE'
+            },
+            @{
+                Label    = 'zs_is_not_archive'
+                Output   = "Is not archive`n"
+                Expected = 'NOT_ARCHIVE'
+            },
+            @{
+                Label    = 'zs_cant_open_as_archive'
+                Output   = "Can't open as archive: 1`n"
+                Expected = 'NOT_ARCHIVE'
+            },
+            @{
+                Label    = 'zs_real_combo'
+                Output   = @"
+Open ERROR: Cannot open the file as [7z] archive
+
+ERRORS:
+Is not archive
+
+Can't open as archive: 1
+"@
+                Expected = 'NOT_ARCHIVE'
+            }
+        )
+        'status_not_archive' = @(
+            @{
+                Label    = 'zs_bracket_zip_type'
+                Output   = "ERROR: Cannot open the file as [zip] archive`n"
+                Expected = 'NOT_ARCHIVE'
+            },
+            @{
+                Label    = 'zs_bracket_casefold'
+                Output   = "error: cannot open the file as [7Z] archive`n"
+                Expected = 'NOT_ARCHIVE'
+            }
+        )
+        'wrong_password_cannot_open_encrypted' = @(
+            @{
+                Label    = 'zs_wrong_password_beats_not_archive'
+                Output   = "ERROR: Cannot open encrypted archive. Wrong password?`nIs not archive`n"
+                Expected = 'WRONG_PASSWORD'
+            }
+        )
+        'classifier_never_sets_password_used' = @(
+            @{
+                Label              = 'zs_not_archive_never_sets_password_used'
+                Output            = "Open ERROR: Cannot open the file as [7z] archive`nIs not archive`nCan't open as archive: 1`n"
+                Expected          = 'NOT_ARCHIVE'
+                RequireEmptyPass  = $true
+            }
+        )
+    }
+
     foreach ($name in $caseNames) {
         It "case $name PASS" {
             $script:Results.ContainsKey($name) | Should Be $true
             $script:Results[$name] | Should Be 'PASS'
+            if ($zsNotArchiveExtras.ContainsKey($name)) {
+                foreach ($extra in $zsNotArchiveExtras[$name]) {
+                    $probe = Invoke-Classify7zProbe -Output $extra.Output -ExitCode 2
+                    $probe.Status | Should Be $extra.Expected
+                    if ($extra.ContainsKey('RequireEmptyPass') -and $extra.RequireEmptyPass) {
+                        $probe.PasswordUsed | Should Be ''
+                    }
+                }
+            }
         }
     }
 }
