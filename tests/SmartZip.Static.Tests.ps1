@@ -253,12 +253,12 @@ Describe 'VersionBanner' {
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
     }
 
-    It 'edition is Kirs.1' {
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.1"'
+    It 'edition is Kirs.2' {
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.2"'
     }
 
-    It 'buildVersion is 21' {
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*21\b'
+    It 'buildVersion is 22' {
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*22\b'
     }
 
     It 'buileTime matches the Kirs.1 build timestamp' {
@@ -271,15 +271,15 @@ Describe 'VersionBanner' {
             Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
     }
 
-    It 'Ahk2Exe product version is 21' {
+    It 'Ahk2Exe product version is 22' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+21\b'
+            Should Match ';@Ahk2Exe-SetProductVersion\s+22\b'
     }
 }
 
 Describe 'AboutSection' {
 
-    It 'shows SmartZip 3.6 Kirs.1 build 21' {
+    It 'shows SmartZip 3.6 Kirs.2 build 22' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
@@ -1219,5 +1219,104 @@ Describe 'DiagnosticUISafety' {
         $hasRedactCmdArgs | Should Be $true
         $hasRedactLine = Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(\s*line\s*\)'
         $hasRedactLine | Should Be $true
+    }
+}
+
+Describe 'Kirs2MetadataAndDocs' {
+
+    BeforeAll {
+        $script:ReadmePath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\README.md'))
+        $script:IniDocPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\ini.md'))
+        $script:ReadmeText = if (Test-Path -LiteralPath $script:ReadmePath) {
+            Get-Content -LiteralPath $script:ReadmePath -Raw -Encoding UTF8
+        } else { '' }
+        $script:IniDocText = if (Test-Path -LiteralPath $script:IniDocPath) {
+            Get-Content -LiteralPath $script:IniDocPath -Raw -Encoding UTF8
+        } else { '' }
+    }
+
+    It 'Kirs2 file version remains 3.6' {
+        $script:SmartZipSource |
+            Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
+    }
+
+    It 'Kirs2 product version is 22' {
+        $script:SmartZipSource |
+            Should Match ';@Ahk2Exe-SetProductVersion\s+22\b'
+    }
+
+    It 'Kirs2 buildVersion is 22' {
+        $script:SmartZipSource |
+            Should Match 'buildVersion\s*:=\s*22\b'
+    }
+
+    It 'Kirs2 edition is Kirs.2' {
+        $script:SmartZipSource |
+            Should Match 'edition\s*:=\s*"Kirs\.2"'
+    }
+
+    It 'Kirs2 About keeps version edition build expression' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
+        $ok | Should Be $true
+    }
+
+    It 'Kirs2 rendered About identity is exact' {
+        # Identity is the product of MainVersion + edition + buildVersion constants.
+        $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.2"'
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*22\b'
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
+        $ok | Should Be $true
+        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.2 (22)).
+        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.2\s+\(22\)') -or
+            ($script:SmartZipSource -match 'MainVersion\s*:=\s*"3\.6"' -and
+             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.2"' -and
+             $script:SmartZipSource -match 'buildVersion\s*:=\s*22\b') | Should Be $true
+    }
+
+    It 'Kirs2 About keeps removed rows absent' {
+        $script:SmartZipSource | Should Not Match '支持作者'
+        $script:SmartZipSource | Should Not Match '建议反馈'
+        $script:SmartZipSource | Should Not Match '论坛反馈'
+    }
+
+    It 'Kirs2 README names safety pipeline' {
+        $script:ReadmeText | Should Match 'Kirs\.2'
+        $script:ReadmeText | Should Match 'list|探测|list →|list→'
+        $ok = Test-Regex -Text $script:ReadmeText -Pattern `
+            '(?s)(list|探测).{0,120}(test|测试).{0,120}(extract|解压).{0,200}(finalize|提交|整理)|安全.?优先|safety.?first|解压可靠性|安全解压流水线'
+        $ok | Should Be $true
+    }
+
+    It 'Kirs2 README documents volume preservation' {
+        $ok = Test-Regex -Text $script:ReadmeText -Pattern `
+            '(?s)(首卷|第一卷|first.?volume).{0,200}(不.?自动删除|never|保留|preserve|normalization|规范化)'
+        $ok | Should Be $true
+        $script:ReadmeText | Should Match '分卷|volume'
+    }
+
+    It 'Kirs2 ini docs deprecate successPercent' {
+        $script:IniDocText | Should Match 'successPercent'
+        $ok = Test-Regex -Text $script:IniDocText -Pattern `
+            '(?s)successPercent.{0,200}(兼容保留|已弃用|deprecated|运行时不读取|不再通过大小百分比)'
+        $ok | Should Be $true
+    }
+
+    It 'Kirs2 docs explain recovery and redaction' {
+        $combined = $script:ReadmeText + "`n" + $script:IniDocText
+        $okPartial = Test-Regex -Text $combined -Pattern '解压不完整|partial'
+        $okRedact = Test-Regex -Text $combined -Pattern '脱敏|redact|密码.?不|password.?redact'
+        $okDiag = Test-Regex -Text $combined -Pattern '诊断|diagnostic'
+        ($okPartial -and $okRedact -and $okDiag) | Should Be $true
+    }
+
+    It 'Kirs2 docs name engine without replacing Kirs1' {
+        $combined = $script:ReadmeText + "`n" + $script:IniDocText
+        $combined | Should Match 'C:\\Tool\\7-Zip-Zstandard\\7z\.exe|7-Zip-Zstandard'
+        $replaced = Test-Regex -Text $combined -Pattern `
+            '(?i)(Kirs\.1\s*(已被?替换|is\s+replaced|was\s+replaced)|replaces?\s+Kirs\.1|替代\s*Kirs\.1)'
+        $replaced | Should Be $false
     }
 }

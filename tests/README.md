@@ -15,14 +15,14 @@ Integration / smoke never read or write `C:\Tool\SmartZip`. Every archive, INI, 
 
 `%TEMP%\SmartZip-Kirs2-<guid>`
 
-## Exact command order and counts (Task 8 gate)
+## Exact command order and counts (Task 9 / whole-branch gate)
 
 ```powershell
 $expected = [ordered]@{
-  'Real7Zip.Integration.Tests.ps1'=26; 'SmartZip.Static.Tests.ps1'=138
-  'DiagnosticUI.Tests.ps1'=36; 'NestingMigration.Tests.ps1'=30
-  'ExtractionLifecycle.Tests.ps1'=26; 'PasswordPreflight.Tests.ps1'=70
-  'RunCmdCapture.Tests.ps1'=15; 'ArchiveDiagnostics.Tests.ps1'=140
+  'SmartZip.Static.Tests.ps1'=150; 'ArchiveDiagnostics.Tests.ps1'=140
+  'RunCmdCapture.Tests.ps1'=15; 'PasswordPreflight.Tests.ps1'=70
+  'ExtractionLifecycle.Tests.ps1'=26; 'NestingMigration.Tests.ps1'=30
+  'DiagnosticUI.Tests.ps1'=36; 'Real7Zip.Integration.Tests.ps1'=26
 }
 foreach ($item in $expected.GetEnumerator()) {
     $r = Invoke-Pester -Script (Join-Path '.\tests' $item.Key) -PassThru
@@ -31,9 +31,10 @@ foreach ($item in $expected.GetEnumerator()) {
     }
 }
 git diff --check
+if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 ```
 
-Expected: integration `26/26`, static `138/138`, UI `36/36`, nesting `30/30`, lifecycle `26/26`, password `70/70`, capture `15/15`, diagnostics `140/140` (focused volume `68/68` inside diagnostics).
+Expected exact totals: static `150/150`, diagnostics `140/140` (including focused volume `68/68`), capture `15/15`, password/workflow `70/70`, lifecycle `26/26`, nesting `30/30`, UI `36/36`, real integration `26/26`.
 
 ## Task 8 real-7-Zip suite
 
