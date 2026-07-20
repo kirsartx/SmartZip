@@ -53,7 +53,8 @@ function Get-Normalized7zStatus {
         $trimmed = $raw.Trim()
         if (-not $trimmed) { continue }
 
-        if ($trimmed -match '(?i)Wrong password\?' -or $trimmed.Contains('Cannot open encrypted archive')) {
+        # Classic: "Wrong password?" ; 7-Zip ZS content-enc: "ERROR: Wrong password : file"
+        if ($trimmed -match '(?i)Wrong password' -or $trimmed.Contains('Cannot open encrypted archive')) {
             $hasWrongPassword = $true
         }
         if ($trimmed -match '(?i)Cannot find volume|Missing volume|Cannot open volume|Broken volume') {
@@ -203,7 +204,9 @@ function New-ArchiveFromFiles {
     param(
         [string]$ArchivePath,
         [string[]]$Files,
-        [string[]]$ExtraArgs = @()
+        [string[]]$ExtraArgs = @(),
+        [ValidateSet('7z', 'zip')]
+        [string]$Type = '7z'
     )
     Assert-NoDeployedSmartZipAccess $ArchivePath
     $parent = Split-Path -Parent $ArchivePath
@@ -213,12 +216,27 @@ function New-ArchiveFromFiles {
     if (Test-Path -LiteralPath $ArchivePath) {
         Remove-Item -LiteralPath $ArchivePath -Force
     }
-    $args = @('a', '-t7z', '-y') + $ExtraArgs + @($ArchivePath) + $Files
+    $args = @('a', "-t$Type", '-y') + $ExtraArgs + @($ArchivePath) + $Files
     $r = Invoke-7z -ArgumentList $args
     if ($r.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $ArchivePath)) {
         throw "failed to create archive $ArchivePath exit=$($r.ExitCode)"
     }
     return $r
+}
+
+function Invoke-7zListSlt {
+    param(
+        [string]$ArchivePath,
+        [string]$Password = ''
+    )
+    $args = @('l', '-slt', '-bso1', '-bse1', '-bsp0', '-sccUTF-8')
+    if ($Password -ne '') {
+        $args += "-p$Password"
+    } else {
+        $args += '-p'
+    }
+    $args += $ArchivePath
+    return Invoke-7z -ArgumentList $args
 }
 
 function Test-ArchiveStatus {
@@ -438,6 +456,76 @@ $manifest.fixtures['passwordCancel'] = [ordered]@{
     expectedStatus = 'CANCELLED'
     selectedMember = [System.IO.Path]::GetFileName($encPath)
     sharedWith     = 'encryptedHeader'
+}
+
+# encryptedContentZip — readable header, content AES encryption (I1/I2)
+# Live 7-Zip ZS: `l -slt -p` exits 0 with item Encrypted = +; wrong pwd → "ERROR: Wrong password : <file>"
+$encZipPath = Join-Path $fxDir 'encryptedContent.zip'
+New-ArchiveFromFiles -ArchivePath $encZipPath -Files $twoFiles -Type 'zip' -ExtraArgs @('-mem=AES256', "-p$fixturePassword") | Out-Null
+$zipList = Invoke-7zListSlt -ArchivePath $encZipPath -Password ''
+if ($zipList.ExitCode -ne 0) {
+    throw "encryptedContentZip empty-password list exit=$($zipList.ExitCode)"
+}
+if ($zipList.Output -notmatch '(?m)^\s*Encrypted\s*=\s*\+\s*$') {
+    throw "encryptedContentZip probe list missing Encrypted = + marker"
+}
+$trZipOk = Test-ArchiveStatus -ArchivePath $encZipPath -Password $fixturePassword
+if ($trZipOk.Status -ne 'OK') { throw "encryptedContentZip correct password status=$($trZipOk.Status)" }
+$trZipWrong = Test-ArchiveStatus -ArchivePath $encZipPath -Password ($fixturePassword + '-WRONG')
+if ($trZipWrong.ExitCode -eq 0) { throw 'encryptedContentZip wrong password unexpectedly OK' }
+if ($trZipWrong.Output -notmatch '(?i)Wrong password') {
+    throw "encryptedContentZip wrong password output missing Wrong password marker"
+}
+$manifest.fixtures['encryptedContentZip'] = [ordered]@{
+    key            = 'encryptedContentZip'
+    path           = $encZipPath
+    members        = @([System.IO.Path]::GetFileName($encZipPath))
+    expectedStatus = 'OK'   # with correctSaved password mode
+    probeStatus    = 'NEED_PASSWORD'
+    encryption     = 'content'
+    selectedMember = [System.IO.Path]::GetFileName($encZipPath)
+}
+$manifest.fixtures['encryptedContentZipWrong'] = [ordered]@{
+    key            = 'encryptedContentZipWrong'
+    path           = $encZipPath
+    members        = @([System.IO.Path]::GetFileName($encZipPath))
+    expectedStatus = 'WRONG_PASSWORD'
+    encryption     = 'content'
+    selectedMember = [System.IO.Path]::GetFileName($encZipPath)
+    sharedWith     = 'encryptedContentZip'
+}
+
+# encryptedContent7z — content encryption without header encryption (-mhe=off)
+$enc7zContentPath = Join-Path $fxDir 'encryptedContent.7z'
+New-ArchiveFromFiles -ArchivePath $enc7zContentPath -Files $twoFiles -Type '7z' -ExtraArgs @('-mhe=off', "-p$fixturePassword") | Out-Null
+$sevList = Invoke-7zListSlt -ArchivePath $enc7zContentPath -Password ''
+if ($sevList.ExitCode -ne 0) {
+    throw "encryptedContent7z empty-password list exit=$($sevList.ExitCode)"
+}
+if ($sevList.Output -notmatch '(?m)^\s*Encrypted\s*=\s*\+\s*$') {
+    throw "encryptedContent7z probe list missing Encrypted = + marker"
+}
+$trSevOk = Test-ArchiveStatus -ArchivePath $enc7zContentPath -Password $fixturePassword
+if ($trSevOk.Status -ne 'OK') { throw "encryptedContent7z correct password status=$($trSevOk.Status)" }
+$trSevWrong = Test-ArchiveStatus -ArchivePath $enc7zContentPath -Password ($fixturePassword + '-WRONG')
+if ($trSevWrong.ExitCode -eq 0) { throw 'encryptedContent7z wrong password unexpectedly OK' }
+$manifest.fixtures['encryptedContent7z'] = [ordered]@{
+    key            = 'encryptedContent7z'
+    path           = $enc7zContentPath
+    members        = @([System.IO.Path]::GetFileName($enc7zContentPath))
+    expectedStatus = 'OK'
+    probeStatus    = 'NEED_PASSWORD'
+    encryption     = 'content'
+    selectedMember = [System.IO.Path]::GetFileName($enc7zContentPath)
+}
+$manifest.fixtures['encryptedContent7zWrong'] = [ordered]@{
+    key            = 'encryptedContent7zWrong'
+    path           = $enc7zContentPath
+    members        = @([System.IO.Path]::GetFileName($enc7zContentPath))
+    expectedStatus = 'WRONG_PASSWORD'
+    encryption     = 'content'
+    selectedMember = [System.IO.Path]::GetFileName($enc7zContentPath)
+    sharedWith     = 'encryptedContent7z'
 }
 
 # copy-mode (-mx0) base for header/truncation corruption

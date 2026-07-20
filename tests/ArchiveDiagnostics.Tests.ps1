@@ -261,6 +261,71 @@ Can't open as archive: 1
                 Label    = 'zs_wrong_password_beats_not_archive'
                 Output   = "ERROR: Cannot open encrypted archive. Wrong password?`nIs not archive`n"
                 Expected = 'WRONG_PASSWORD'
+            },
+            @{
+                # Live 7-Zip ZS content-encrypted ZIP wrong password (no trailing '?')
+                Label    = 'zs_wrong_password_colon_payload'
+                Output   = "ERROR: Wrong password : payload.txt`nSub items Errors: 1`n"
+                Expected = 'WRONG_PASSWORD'
+            },
+            @{
+                Label    = 'zs_wrong_password_colon_beats_data_error_context'
+                Output   = "ERROR: Wrong password : payload.txt`nERROR: Data Error`n"
+                Expected = 'WRONG_PASSWORD'
+            }
+        )
+        'need_password_enter_prompt' = @(
+            @{
+                # Live 7-Zip ZS content-encrypted archive: l -slt -p"" exits 0 with item Encrypted = +
+                Label     = 'zs_probe_encrypted_plus_need_password'
+                Output    = @"
+Type = zip
+Physical Size = 230
+
+----------
+Path = payload.txt
+Folder = -
+Size = 24
+Encrypted = +
+Method = AES-256 Store
+"@
+                Expected  = 'NEED_PASSWORD'
+                ExitCode  = 0
+                Stage     = 'probe'
+            },
+            @{
+                Label     = 'zs_probe_encrypted_plus_7z_need_password'
+                Output    = @"
+Type = 7z
+Method = LZMA2:12 7zAES
+
+----------
+Path = payload.txt
+Size = 24
+Encrypted = +
+Method = LZMA2:12 7zAES:19
+"@
+                Expected  = 'NEED_PASSWORD'
+                ExitCode  = 0
+                Stage     = 'probe'
+            }
+        )
+        'ok_clean' = @(
+            @{
+                # Non-encrypted item marker must remain OK on probe
+                Label     = 'zs_probe_encrypted_minus_stays_ok'
+                Output    = "Type = zip`nPath = payload.txt`nEncrypted = -`n"
+                Expected  = 'OK'
+                ExitCode  = 0
+                Stage     = 'probe'
+            },
+            @{
+                # Encrypted = + only forces password path on probe, not successful non-probe stages
+                Label     = 'zs_extract_encrypted_plus_exit0_stays_ok'
+                Output    = "Type = zip`nEncrypted = +`nEverything is Ok`n"
+                Expected  = 'OK'
+                ExitCode  = 0
+                Stage     = 'extract'
             }
         )
         'classifier_never_sets_password_used' = @(
@@ -279,7 +344,9 @@ Can't open as archive: 1
             $script:Results[$name] | Should Be 'PASS'
             if ($zsNotArchiveExtras.ContainsKey($name)) {
                 foreach ($extra in $zsNotArchiveExtras[$name]) {
-                    $probe = Invoke-Classify7zProbe -Output $extra.Output -ExitCode 2
+                    $exitCode = if ($extra.ContainsKey('ExitCode')) { [int]$extra.ExitCode } else { 2 }
+                    $stage = if ($extra.ContainsKey('Stage')) { [string]$extra.Stage } else { 'probe' }
+                    $probe = Invoke-Classify7zProbe -Output $extra.Output -ExitCode $exitCode -Stage $stage
                     $probe.Status | Should Be $extra.Expected
                     if ($extra.ContainsKey('RequireEmptyPass') -and $extra.RequireEmptyPass) {
                         $probe.PasswordUsed | Should Be ''

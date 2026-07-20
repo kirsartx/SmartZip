@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Real 7-Zip + compiled SmartZip integration suite (Task 8) — exactly 26 It blocks.
+  Real 7-Zip + compiled SmartZip integration suite (Task 8) — exactly 30 It blocks.
 .NOTES
   Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs2-<guid>.
   Never reads/writes C:\Tool\SmartZip. Passwords stay process-env only.
@@ -338,6 +338,34 @@ Describe 'Real7Zip Integration' {
         if (-not (Ensure-Ready)) { return }
         $run = Get-CachedScenario -Key 'status' -Scenario 'passwordCancel' -DelSource 0 -PasswordMode 'dialogCancel'
         Get-ResultStatus $run | Should Be 'CANCELLED'
+        Assert-SourcePreserved $run
+    }
+
+    # ---- content-encryption regressions (I1/I2; readable header + Encrypted = +) ----
+
+    It 'encryptedContentZip with correctSaved password is OK' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'status' -Scenario 'encryptedContentZip' -DelSource 0 -PasswordMode 'correctSaved'
+        Get-ResultStatus $run | Should Be 'OK'
+    }
+
+    It 'encryptedContentZipWrong with wrongDialog stays WRONG_PASSWORD and source preserved' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'status' -Scenario 'encryptedContentZipWrong' -DelSource 0 -PasswordMode 'wrongDialog'
+        Get-ResultStatus $run | Should Be 'WRONG_PASSWORD'
+        Assert-SourcePreserved $run
+    }
+
+    It 'encryptedContent7z with correctSaved password is OK' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'status' -Scenario 'encryptedContent7z' -DelSource 0 -PasswordMode 'correctSaved'
+        Get-ResultStatus $run | Should Be 'OK'
+    }
+
+    It 'encryptedContent7zWrong with wrongDialog stays WRONG_PASSWORD and source preserved' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'status' -Scenario 'encryptedContent7zWrong' -DelSource 0 -PasswordMode 'wrongDialog'
+        Get-ResultStatus $run | Should Be 'WRONG_PASSWORD'
         Assert-SourcePreserved $run
     }
 

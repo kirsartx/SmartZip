@@ -190,6 +190,56 @@ AssertContains(host.lastProbeCmd, "-bse1", "probe_cmd_bse1")
 AssertContains(host.lastProbeCmd, "-bsp0", "probe_cmd_bsp0")
 AssertContains(host.lastProbeCmd, "-sccUTF-8", "probe_cmd_utf8")
 
+; Content-encrypted readable-header ZIP/7z: probe exits 0 with Encrypted = + → NEED_PASSWORD
+; so ResolveArchivePassword is entered (I2). Live 7-Zip ZS form.
+host.ResetPasswordState()
+host.scriptedCapture := { exitCode: 0, output: "Type = zip`nPath = payload.txt`nEncrypted = +`nMethod = AES-256 Store`n", cancelled: false }
+prEnc := host.ProbeArchive("C:\\content-enc.zip")
+AssertEq(prEnc.status, ArchiveStatus.NEED_PASSWORD, "probe_content_encrypted_plus_need_password")
+AssertEq(prEnc.stage, "probe", "probe_content_encrypted_stage")
+; Encrypted = - must not enter password path
+host.scriptedCapture := { exitCode: 0, output: "Type = zip`nPath = payload.txt`nEncrypted = -`n", cancelled: false }
+prPlain := host.ProbeArchive("C:\\plain.zip")
+AssertEq(prPlain.status, ArchiveStatus.OK, "probe_encrypted_minus_ok")
+host.testCalls := 0
+gotPlain := host.ResolveArchivePassword("C:\\plain.zip", prPlain)
+AssertEq(gotPlain.status, ArchiveStatus.OK, "resolve_skips_non_password_ok_probe")
+AssertEq(host.testCalls, 0, "resolve_no_tests_for_plain_probe")
+; NEED_PASSWORD from Encrypted = + must iterate candidates; correct saved password wins
+host.ResetPasswordState()
+host.lastPass := "right-content"
+host.clipText := ""
+host.dynamicPassSort := false
+host.autoAddPass := false
+host.addDir2Pass := false
+host.password := ["", "right-content"]
+host.scriptedTest := Map(
+    "" , ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "test", 2, "C:\\content-enc.zip", "ERROR: Wrong password : payload.txt`n"),
+    "right-content", ArchiveResult(ArchiveStatus.OK, "test", 0, "C:\\content-enc.zip", "Everything is Ok`n")
+)
+probeContent := ArchiveResult(ArchiveStatus.NEED_PASSWORD, "probe", 0, "C:\\content-enc.zip", "Encrypted = +`n")
+gotContent := host.ResolveArchivePassword("C:\\content-enc.zip", probeContent)
+AssertEq(gotContent.status, ArchiveStatus.OK, "resolve_content_encrypted_correct_password_ok")
+AssertEq(gotContent.passwordUsed, "right-content", "resolve_content_encrypted_sets_password_used")
+; Wrong password on content-encrypted ZIP colon form stays WRONG_PASSWORD
+host.ResetPasswordState()
+host.lastPass := ""
+host.clipText := ""
+host.dynamicPassSort := false
+host.autoAddPass := false
+host.addDir2Pass := false
+host.password := [""]
+host.dialogOverride := { action: "use", password: "typed-wrong-zip" }
+host.scriptedTest := Map(
+    "" , ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "test", 2, "C:\\content-enc.zip", "ERROR: Wrong password : payload.txt`n"),
+    "typed-wrong-zip", ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "test", 2, "C:\\content-enc.zip", "ERROR: Wrong password : payload.txt`n")
+)
+probeContent2 := ArchiveResult(ArchiveStatus.NEED_PASSWORD, "probe", 0, "C:\\content-enc.zip", "Encrypted = +`n")
+gotZipWrong := host.ResolveArchivePassword("C:\\content-enc.zip", probeContent2)
+AssertEq(gotZipWrong.status, ArchiveStatus.WRONG_PASSWORD, "resolve_content_encrypted_wrong_password_colon")
+
+; Restore clean capture path for TestArchive product classification assertions
+host.ResetPasswordState()
 host.scriptedCapture := { exitCode: 0, output: "Everything is Ok`n", cancelled: false }
 tr := host.TestArchive("C:\\enc.7z", "pw")
 AssertEq(tr.status, ArchiveStatus.OK, "test_classifies_ok")

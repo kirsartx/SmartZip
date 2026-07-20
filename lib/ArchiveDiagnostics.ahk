@@ -66,7 +66,8 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
         isWarn := false
         isErr := false
 
-        if (trimmed ~= "i)Wrong password\?" || InStr(trimmed, "Cannot open encrypted archive")) {
+        ; Classic: "Wrong password?" ; 7-Zip ZS content-enc: "ERROR: Wrong password : file"
+        if (trimmed ~= "i)Wrong password" || InStr(trimmed, "Cannot open encrypted archive")) {
             hasWrongPassword := true
             isErr := true
         }
@@ -82,6 +83,10 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
         if (InStr(trimmed, "Enter password (will not be echoed):")) {
             hasNeedPassword := true
             isErr := true
+        }
+        ; Content-encrypted readable header: probe list shows item Encrypted = + (exit often 0)
+        if (stage = "probe" && trimmed ~= "i)^Encrypted\s*=\s*\+") {
+            hasNeedPassword := true
         }
         if (trimmed ~= "i)Unsupported Method" || trimmed ~= "i)Unsupported method" || trimmed ~= "i)Method is not supported") {
             hasUnsupported := true

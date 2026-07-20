@@ -103,6 +103,15 @@ if (mode = "classify" || mode = "all") {
     r := Classify7zResult("probe", 2, "Enter password (will not be echoed):`nERROR: Wrong password?`n")
     AssertEq(r.status, ArchiveStatus.NEED_PASSWORD, "need_password_enter_prompt")
 
+    ; 3b) Content-encrypted readable-header probe: exit 0 + item Encrypted = + → NEED_PASSWORD
+    ; Live 7-Zip ZS (26.02) for content-encrypted ZIP/7z with empty -p on `l -slt`.
+    r := Classify7zResult("probe", 0, "Type = zip`nPath = payload.txt`nEncrypted = +`nMethod = AES-256 Store`n")
+    AssertEq(r.status, ArchiveStatus.NEED_PASSWORD, "need_password_probe_encrypted_plus")
+    r := Classify7zResult("probe", 0, "Type = zip`nPath = payload.txt`nEncrypted = -`n")
+    AssertEq(r.status, ArchiveStatus.OK, "probe_encrypted_minus_stays_ok")
+    r := Classify7zResult("extract", 0, "Type = zip`nEncrypted = +`nEverything is Ok`n")
+    AssertEq(r.status, ArchiveStatus.OK, "extract_encrypted_plus_exit0_stays_ok")
+
     ; 4) WRONG_PASSWORD beats Headers Error in same output
     r := Classify7zResult("test", 2, "ERROR: Wrong password?`nHeaders Error`nSystem ERROR:`n")
     AssertEq(r.status, ArchiveStatus.WRONG_PASSWORD, "wrong_password_beats_headers")
@@ -111,6 +120,11 @@ if (mode = "classify" || mode = "all") {
     ; 5) Cannot open encrypted archive
     r := Classify7zResult("probe", 2, "ERROR: Cannot open encrypted archive. Wrong password?`n")
     AssertEq(r.status, ArchiveStatus.WRONG_PASSWORD, "wrong_password_cannot_open_encrypted")
+
+    ; 5b) Live ZIP content-encryption wrong-password form (no trailing '?')
+    ; 7-Zip ZS: "ERROR: Wrong password : payload.txt"
+    r := Classify7zResult("test", 2, "ERROR: Wrong password : payload.txt`nSub items Errors: 1`n")
+    AssertEq(r.status, ArchiveStatus.WRONG_PASSWORD, "wrong_password_colon_payload")
 
     ; 6) UNSUPPORTED_METHOD
     r := Classify7zResult("probe", 2, "ERROR: Unsupported Method`n")
