@@ -273,6 +273,10 @@ Describe 'ArchiveDiagnosticsVolumes' {
             'inclusive_bound_is_volume', 'inclusive_bound_empty_missing',
             'inclusive_bound_keeps_members', 'inclusive_bound_keeps_last'
         )
+        'r00_is_volume' = @(
+            'mixed_rar_width_is_volume', 'mixed_rar_width_member_count',
+            'mixed_rar_width_excludes_other_width'
+        )
     }
 
     foreach ($name in $volumeCases) {

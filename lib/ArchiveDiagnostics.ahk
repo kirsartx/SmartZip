@@ -268,7 +268,7 @@ DetectVolumeGroup(path, siblingNames) {
             members.Push(dir "\" indexToName[0])
         sortedExtra := []
         for n in names {
-            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm))
+            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm) && StrLen(mm[1]) = width)
                 sortedExtra.Push([Integer(mm[1]), n])
         }
         ; sort by r-number ascending (simple insertion)

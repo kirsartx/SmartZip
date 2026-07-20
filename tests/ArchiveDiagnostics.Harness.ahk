@@ -404,6 +404,13 @@ if (mode = "volumes" || mode = "all") {
     AssertEq(g.missingVolumes.Length, 0, "inclusive_bound_empty_missing")
     AssertEq(g.members.Length, 2, "inclusive_bound_keeps_members")
     AssertTrue(_ArrayHas(g.members, dir "\edge.4097"), "inclusive_bound_keeps_last")
+
+    ; --- review-fix: mixed legacy RAR widths are separate groups ---
+    siblings := ["backup.rar", "backup.r00", "backup.r000"]
+    g := DetectVolumeGroup(dir "\backup.r00", siblings)
+    AssertTrue(g.isVolume, "mixed_rar_width_is_volume")
+    AssertEq(g.members.Length, 2, "mixed_rar_width_member_count")
+    AssertFalse(_ArrayHas(g.members, dir "\backup.r000"), "mixed_rar_width_excludes_other_width")
 }
 
 summary := "SUMMARY passed=" passCount " failed=" failCount
