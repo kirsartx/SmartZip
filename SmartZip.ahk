@@ -5,12 +5,13 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6
-;@Ahk2Exe-SetProductVersion 20
+;@Ahk2Exe-SetProductVersion 21
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 20
+buildVersion := 21
 MainVersion := "3.6"
+edition := "Kirs.1"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2023/1/30 17:46:22"
+buileTime := "2026/7/20 12:56:47"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
@@ -1537,19 +1538,15 @@ Setting()
 
     Tab.UseTab(6)
     set.AddText()
-    set.AddText("", app " " MainVersion " (" buildVersion ")")
+    set.AddText("", app " " MainVersion " " edition " (" buildVersion ")")
     lineGeneration
     set.AddText("", "修改时间 " buileTime)
     set.AddText()
     set.AddText(, "相关链接")
-    set.AddLink(, '<a id="GitHub" href="https://github.com/vvyoko/SmartZip">GitHub</a>')
-    set.AddLink("yp", '<a id="7-zip" href="https://www.7-zip.org/">7-zip</a>').ToolTip := "测试基于 21.07 版本"
+    set.AddLink(, '<a id="GitHub" href="https://github.com/kirsartx/SmartZip">GitHub</a>')
+    set.AddLink("yp", '<a id="Release" href="https://github.com/kirsartx/SmartZip/releases/latest">Release</a>')
+    set.AddLink("yp", '<a id="7-Zip-Zstandard" href="https://github.com/mcmilk/7-Zip-zstd">7-Zip Zstandard</a>').ToolTip := "已测试 7-Zip 26.02 ZS v1.5.7 R1"
     set.AddLink("yp", '<a id="AutoHotkey" href="https://www.autohotkey.com/">AutoHotkey</a>')
-    set.AddLink("yp", '<a id="GitHub2" href="https://github.com/vvyoko/SmartZip/issues/new">建议反馈</a>').ToolTip := "在GitHub上新建issues建议或反馈"
-    set.AddLink("yp", '<a id="GitHub2" href="https://meta.appinn.net/t/topic/33555">论坛反馈</a>').ToolTip := "也可选择在小众软件反馈"
-    donateBtn := set.AddButton("y+80 x+50", "支持作者")
-    donateBtn.OnEvent("Click", (*) => Donate())
-    donateBtn.ToolTip := "如软件对您有帮助,可考虑捐助"
 
     Tab.UseTab()
     set.AddButton("", "取消").OnEvent("Click", Close)
@@ -1857,32 +1854,6 @@ Setting()
             MsgBox("已注册右键")
         else
             MsgBox("已删除右键")
-    }
-
-    Donate()
-    {
-        static hwnd := 0
-        if WinExist(hwnd)
-            WinActivate
-        wexin := A_Temp "\05330e88467ebffcb9b614d091ab1297e3396e063e28074c92c69e8eb36acc32"
-        alipay := A_Temp "\dd64f3fcf719e9e263e0aa116e65aa1eb8ebb81ca2615841b23d7e1a902f10df"
-        if !FileExist(wexin)
-            FileInstall("donate\wexin.png", wexin)
-        if !FileExist(alipay)
-            FileInstall("donate\alipay.jpg", alipay)
-
-        donateG := Gui("+ToolWindow +Owner" set.Hwnd, "捐助")
-        donateG.SetFont(, "Segoe UI")
-        donateG.AddText("", "如软件对您有帮助`n可扫描下方二维码通过微信或支付宝捐助`n感谢支持")
-        ; donateG.AddLink("", '<a id="donate" href="https://github.com/vvyoko/SmartZip/blob/main/donate.md">支持者名单</a>').ToolTip := "如有隐私考虑可在备注上说明"
-        donateG.AddText()
-        donateG.AddPicture("w150 h-1", wexin)
-        donateG.AddPicture("yp x+30 w150 h-1", alipay)
-        donateG.AddText()
-        donateG.Show()
-        hwnd := donateG.Hwnd
-        donateG.OnEvent("Escape", (*) => donateG.Destroy())
-        donateG.OnEvent("Close", (*) => donateG.Destroy())
     }
 
     lineGeneration(opt := "") => set.AddText(opt " h1 BackgroundD8D8D8 w400")

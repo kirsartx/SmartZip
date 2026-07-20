@@ -234,34 +234,83 @@ Describe 'SettingsUnZipKey' {
 
 Describe 'VersionBanner' {
 
-    It 'MainVersion is 3.6' {
+    It 'MainVersion remains numeric 3.6' {
+        $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
+    }
+
+    It 'edition is Kirs.1' {
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.1"'
+    }
+
+    It 'buildVersion is 21' {
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*21\b'
+    }
+
+    It 'buileTime matches the Kirs.1 build timestamp' {
+        $script:SmartZipSource |
+            Should Match 'buileTime\s*:=\s*"2026/7/20 12:56:47"'
+    }
+
+    It 'Ahk2Exe file version remains 3.6' {
+        $script:SmartZipSource |
+            Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
+    }
+
+    It 'Ahk2Exe product version is 21' {
+        $script:SmartZipSource |
+            Should Match ';@Ahk2Exe-SetProductVersion\s+21\b'
+    }
+}
+
+Describe 'AboutSection' {
+
+    It 'shows SmartZip 3.6 Kirs.1 build 21' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
-            'MainVersion\s*:=\s*"3\.6"'
+            'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
     }
 
-    It 'buildVersion is 20' {
-        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
-            'buildVersion\s*:=\s*20\b'
-        $ok | Should Be $true
+    It 'links to the maintained repository and latest Release' {
+        $script:SmartZipSource |
+            Should Match 'https://github\.com/kirsartx/SmartZip'
+        $script:SmartZipSource |
+            Should Match 'https://github\.com/kirsartx/SmartZip/releases/latest'
     }
 
-    It 'buileTime matches the recovered 3.6 timestamp' {
-        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
-            'buileTime\s*:=\s*"2023/1/30 17:46:22"'
-        $ok | Should Be $true
+    It 'links to the tested 7-Zip Zstandard project' {
+        $script:SmartZipSource |
+            Should Match 'https://github\.com/mcmilk/7-Zip-zstd'
+        $script:SmartZipSource |
+            Should Match '已测试 7-Zip 26\.02 ZS v1\.5\.7 R1'
     }
 
-    It 'Ahk2Exe file version is 3.6' {
-        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
-            ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
-        $ok | Should Be $true
+    It 'keeps the AutoHotkey project link' {
+        $script:SmartZipSource |
+            Should Match 'https://www\.autohotkey\.com/'
     }
 
-    It 'Ahk2Exe product version is 20' {
-        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
-            ';@Ahk2Exe-SetProductVersion\s+20\b'
-        $ok | Should Be $true
+    It 'removes legacy feedback and support copy' {
+        $script:SmartZipSource | Should Not Match '建议反馈'
+        $script:SmartZipSource | Should Not Match '论坛反馈'
+        $script:SmartZipSource | Should Not Match '支持作者'
+    }
+
+    It 'removes legacy feedback endpoints' {
+        $script:SmartZipSource |
+            Should Not Match 'github\.com/vvyoko/SmartZip/issues/new'
+        $script:SmartZipSource |
+            Should Not Match 'meta\.appinn\.net/t/topic/33555'
+    }
+
+    It 'removes Donate and embedded donation files' {
+        $script:SmartZipSource | Should Not Match '(?m)^\s+Donate\(\)\s*$'
+        $script:SmartZipSource | Should Not Match 'FileInstall\("donate\\'
+        $script:SmartZipSource | Should Not Match 'donate\\(wexin\.png|alipay\.jpg)'
+    }
+
+    It 'removes tracked donation image assets' {
+        (Join-Path $PSScriptRoot '..\donate\wexin.png') | Should Not Exist
+        (Join-Path $PSScriptRoot '..\donate\alipay.jpg') | Should Not Exist
     }
 }
 
