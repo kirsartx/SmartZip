@@ -1,16 +1,16 @@
-# SmartZip 3.6 Kirs.2 “关于”页清理设计
+# SmartZip 3.6 Kirs.1 “关于”页清理设计
 
 日期：2026-07-20
 
 ## 目标
 
-把设置窗口“关于”页更新为当前维护版本，删除旧作者的反馈与捐赠入口，并发布为独立的 `v3.6-kirs.2`，不改写已经公开的 `v3.6-kirs.1`。
+把设置窗口“关于”页更新为当前维护版本，删除旧作者的反馈与捐赠入口，并更新已经公开的 `v3.6-kirs.1`。
 
 ## 用户可见结果
 
 “关于”页显示：
 
-- `SmartZip 3.6 Kirs.2 (21)`
+- `SmartZip 3.6 Kirs.1 (21)`
 - 本次构建的修改时间
 - 当前维护仓库：[kirsartx/SmartZip](https://github.com/kirsartx/SmartZip)
 - 最新 Release：<https://github.com/kirsartx/SmartZip/releases/latest>
@@ -28,7 +28,7 @@
 ## 版本元数据
 
 - `MainVersion` 保持纯数字字符串 `3.6`，避免破坏 Ahk2Exe 文件版本格式和现有逻辑。
-- 新增独立的版本后缀常量 `Kirs.2`，仅用于产品显示。
+- 新增独立的版本后缀常量 `Kirs.1`，仅用于产品显示。
 - `buildVersion` 从 `20` 更新为 `21`。
 - Ahk2Exe `FileVersion` 保持 `3.6`。
 - Ahk2Exe `ProductVersion` 更新为 `21`。
@@ -66,7 +66,7 @@
 
 1. 先更新/新增 Pester 静态测试并观察 RED。
 2. 测试要求：
-   - Kirs.2、build 21、当前修改时间和产品版本存在。
+   - Kirs.1、build 21、当前修改时间和产品版本存在。
    - 当前 GitHub、Release、7-Zip Zstandard、AutoHotkey 链接存在。
    - 旧 GitHub Issues 链接、小众软件论坛链接及三段旧文字不存在。
    - `Donate()`、捐赠 `FileInstall` 与 `donate` 资源引用不存在。
@@ -81,15 +81,22 @@
 3. 部署前备份 `C:\Tool\SmartZip\SmartZip.exe`。
 4. 仅替换 `SmartZip.exe`，验证 `SmartZip.ini` 与 `Contextmenu.exe` 哈希保持不变。
 5. 将代码推送到 `kirsartx/SmartZip` 的 `main`。
-6. 新建正式 Release `v3.6-kirs.2`，上传最终 `SmartZip.exe` 并记录 SHA-256。
-7. 保留 `v3.6-kirs.1` 的标签、Release 和附件，不移动或覆盖。
+6. 将现有 `v3.6-kirs.1` 标签从旧提交移动到最终源码提交。
+7. 更新现有 `v3.6-kirs.1` Release 的说明，删除旧 `SmartZip.exe` 附件并上传最终 EXE，记录新的 SHA-256。
+8. 不创建 `v3.6-kirs.2`。
+
+更新既有 Release 的影响明确接受：
+
+- `v3.6-kirs.1` 的源码归档将指向新提交。
+- `SmartZip.exe` 下载内容、大小与 SHA-256 会变化。
+- 已经下载的旧文件无法收回；Release 说明必须写明本次刷新。
 
 ## 验收标准
 
 - “关于”页只展示当前项目与依赖信息。
 - 三个旧入口、捐赠函数和捐赠资源全部删除。
-- 版本显示为 `SmartZip 3.6 Kirs.2 (21)`。
+- 版本显示为 `SmartZip 3.6 Kirs.1 (21)`。
 - 完整测试为零失败。
 - 临时 `a` / `x` 冒烟通过。
 - 最终 EXE 部署成功，用户 INI 与 Contextmenu 未被覆盖。
-- `v3.6-kirs.2` 指向最终源码提交，附件哈希与部署 EXE 一致。
+- 更新后的 `v3.6-kirs.1` 指向最终源码提交，附件哈希与部署 EXE 一致。
