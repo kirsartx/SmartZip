@@ -158,3 +158,91 @@ Describe 'ArchiveDiagnosticsClassify' {
         }
     }
 }
+
+Describe 'ArchiveDiagnosticsVolumes' {
+    BeforeAll {
+        $script:VolumeRun = Invoke-ArchiveHarness -Mode volumes
+        $script:VolResults = $script:VolumeRun.Map
+    }
+
+    It 'harness exits 0 on volumes mode' {
+        $script:VolumeRun.ExitCode | Should Be 0
+    }
+
+    $volumeCases = @(
+        'sevenz_001_is_volume',
+        'sevenz_001_selected_is_first',
+        'sevenz_001_first_path',
+        'sevenz_001_member_count',
+        'sevenz_001_member_first',
+        'sevenz_001_member_second',
+        'sevenz_001_no_missing',
+        'sevenz_002_is_volume',
+        'sevenz_002_not_first',
+        'sevenz_002_redirects_first_path',
+        'sevenz_002_no_missing_when_first_present',
+        'zip_001_is_volume',
+        'zip_001_selected_is_first',
+        'zip_001_first_path',
+        'zip_001_member_count',
+        'zip_001_no_missing',
+        'bare_001_is_volume',
+        'bare_001_selected_is_first',
+        'bare_001_first_path',
+        'bare_001_member_count',
+        'part01_rar_is_volume',
+        'part01_rar_selected_is_first',
+        'part01_rar_first_path',
+        'part01_rar_member_count',
+        'part01_rar_no_missing',
+        'part10_rar_is_volume',
+        'part10_rar_not_first',
+        'part10_rar_redirects_to_part01',
+        'part10_rar_reports_gap_missing_count',
+        'part10_rar_missing_includes_part02',
+        'part10_rar_missing_includes_part09',
+        'part10_rar_missing_excludes_present_first',
+        'part10_rar_missing_excludes_selected',
+        'rar_base_is_volume',
+        'rar_base_selected_is_first',
+        'rar_base_first_path',
+        'rar_r00_member_count',
+        'rar_r00_member_base',
+        'rar_r00_member_r00',
+        'rar_r00_member_r01',
+        'rar_r00_complete_no_missing',
+        'r00_is_volume',
+        'r00_not_first',
+        'rxx_redirects_and_reports_gap',
+        'missing_first_still_volume',
+        'missing_first_selected_not_first',
+        'missing_first_first_path_derived',
+        'missing_first_listed',
+        'missing_middle_is_volume',
+        'missing_middle_selected_first',
+        'missing_middle_lists_002',
+        'missing_middle_members_present_only',
+        'non_volume_is_false',
+        'non_volume_empty_first',
+        'non_volume_empty_members',
+        'non_volume_empty_missing',
+        'non_volume_selected_not_first',
+        'solo_001_is_volume',
+        'solo_001_is_first',
+        'solo_001_first_path',
+        'solo_001_one_member',
+        'solo_001_no_fabricated_missing',
+        'orphan_r00_is_volume',
+        'orphan_r00_not_first',
+        'orphan_r00_derives_rar_first',
+        'orphan_r00_missing_base_rar',
+        'orphan_r00_does_not_fabricate_r99'
+    )
+
+    foreach ($name in $volumeCases) {
+        It "volume case $name PASS" {
+            $script:VolResults.ContainsKey($name) | Should Be $true
+            $script:VolResults[$name] | Should Be 'PASS'
+        }
+    }
+}

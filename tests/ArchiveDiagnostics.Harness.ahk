@@ -189,9 +189,136 @@ if (mode = "classify" || mode = "all") {
     AssertEq(r.passwordUsed, "", "classifier_never_sets_password_used")
 }
 
-if (mode = "volumes") {
-    lines.Push("FAIL volumes_mode_not_implemented_in_task1")
-    failCount++
+_ArrayHas(arr, value) {
+    for item in arr {
+        if (item = value)
+            return true
+    }
+    return false
+}
+
+if (mode = "volumes" || mode = "all") {
+    dir := "C:\volfixture"
+
+    ; --- .7z.001 first volume, complete pair ---
+    siblings := ["archive.7z.001", "archive.7z.002"]
+    g := DetectVolumeGroup(dir "\archive.7z.001", siblings)
+    AssertTrue(g.isVolume, "sevenz_001_is_volume")
+    AssertTrue(g.selectedIsFirst, "sevenz_001_selected_is_first")
+    AssertEq(g.firstPath, dir "\archive.7z.001", "sevenz_001_first_path")
+    AssertEq(g.members.Length, 2, "sevenz_001_member_count")
+    AssertEq(g.members[1], dir "\archive.7z.001", "sevenz_001_member_first")
+    AssertEq(g.members[2], dir "\archive.7z.002", "sevenz_001_member_second")
+    AssertEq(g.missingVolumes.Length, 0, "sevenz_001_no_missing")
+
+    ; --- .7z.002 redirects to first ---
+    g := DetectVolumeGroup(dir "\archive.7z.002", siblings)
+    AssertTrue(g.isVolume, "sevenz_002_is_volume")
+    AssertFalse(g.selectedIsFirst, "sevenz_002_not_first")
+    AssertEq(g.firstPath, dir "\archive.7z.001", "sevenz_002_redirects_first_path")
+    AssertEq(g.missingVolumes.Length, 0, "sevenz_002_no_missing_when_first_present")
+
+    ; --- .zip.001 group ---
+    siblings := ["pack.zip.001", "pack.zip.002", "pack.zip.003"]
+    g := DetectVolumeGroup(dir "\pack.zip.001", siblings)
+    AssertTrue(g.isVolume, "zip_001_is_volume")
+    AssertTrue(g.selectedIsFirst, "zip_001_selected_is_first")
+    AssertEq(g.firstPath, dir "\pack.zip.001", "zip_001_first_path")
+    AssertEq(g.members.Length, 3, "zip_001_member_count")
+    AssertEq(g.missingVolumes.Length, 0, "zip_001_no_missing")
+
+    ; --- bare .001 ---
+    siblings := ["data.001", "data.002"]
+    g := DetectVolumeGroup(dir "\data.001", siblings)
+    AssertTrue(g.isVolume, "bare_001_is_volume")
+    AssertTrue(g.selectedIsFirst, "bare_001_selected_is_first")
+    AssertEq(g.firstPath, dir "\data.001", "bare_001_first_path")
+    AssertEq(g.members.Length, 2, "bare_001_member_count")
+
+    ; --- .part01.rar first ---
+    siblings := ["movie.part01.rar", "movie.part02.rar", "movie.part03.rar"]
+    g := DetectVolumeGroup(dir "\movie.part01.rar", siblings)
+    AssertTrue(g.isVolume, "part01_rar_is_volume")
+    AssertTrue(g.selectedIsFirst, "part01_rar_selected_is_first")
+    AssertEq(g.firstPath, dir "\movie.part01.rar", "part01_rar_first_path")
+    AssertEq(g.members.Length, 3, "part01_rar_member_count")
+    AssertEq(g.missingVolumes.Length, 0, "part01_rar_no_missing")
+
+    ; --- .part10.rar not first; first present ---
+    siblings := ["movie.part01.rar", "movie.part10.rar"]
+    g := DetectVolumeGroup(dir "\movie.part10.rar", siblings)
+    AssertTrue(g.isVolume, "part10_rar_is_volume")
+    AssertFalse(g.selectedIsFirst, "part10_rar_not_first")
+    AssertEq(g.firstPath, dir "\movie.part01.rar", "part10_rar_redirects_to_part01")
+    ; Contiguous range 01..10 with only 01 and 10 present → missing 02..09
+    AssertTrue(g.missingVolumes.Length >= 8, "part10_rar_reports_gap_missing_count")
+    AssertTrue(_ArrayHas(g.missingVolumes, "movie.part02.rar"), "part10_rar_missing_includes_part02")
+    AssertTrue(_ArrayHas(g.missingVolumes, "movie.part09.rar"), "part10_rar_missing_includes_part09")
+    AssertFalse(_ArrayHas(g.missingVolumes, "movie.part01.rar"), "part10_rar_missing_excludes_present_first")
+    AssertFalse(_ArrayHas(g.missingVolumes, "movie.part10.rar"), "part10_rar_missing_excludes_selected")
+
+    ; --- name.rar + name.r00 / name.r01 ---
+    siblings := ["backup.rar", "backup.r00", "backup.r01"]
+    g := DetectVolumeGroup(dir "\backup.rar", siblings)
+    AssertTrue(g.isVolume, "rar_base_is_volume")
+    AssertTrue(g.selectedIsFirst, "rar_base_selected_is_first")
+    AssertEq(g.firstPath, dir "\backup.rar", "rar_base_first_path")
+    AssertEq(g.members.Length, 3, "rar_r00_member_count")
+    AssertEq(g.members[1], dir "\backup.rar", "rar_r00_member_base")
+    AssertEq(g.members[2], dir "\backup.r00", "rar_r00_member_r00")
+    AssertEq(g.members[3], dir "\backup.r01", "rar_r00_member_r01")
+    AssertEq(g.missingVolumes.Length, 0, "rar_r00_complete_no_missing")
+
+    g := DetectVolumeGroup(dir "\backup.r00", siblings)
+    AssertTrue(g.isVolume, "r00_is_volume")
+    AssertFalse(g.selectedIsFirst, "r00_not_first")
+    gapSiblings := ["gap.rar", "gap.r00", "gap.r02"]
+    gap := DetectVolumeGroup(dir "\gap.r02", gapSiblings)
+    AssertTrue(g.firstPath = dir "\backup.rar"
+        && _ArrayHas(gap.missingVolumes, "gap.r01"), "rxx_redirects_and_reports_gap")
+
+    ; --- missing first volume (.7z.002 only) ---
+    siblings := ["archive.7z.002", "archive.7z.003"]
+    g := DetectVolumeGroup(dir "\archive.7z.002", siblings)
+    AssertTrue(g.isVolume, "missing_first_still_volume")
+    AssertFalse(g.selectedIsFirst, "missing_first_selected_not_first")
+    AssertEq(g.firstPath, dir "\archive.7z.001", "missing_first_first_path_derived")
+    AssertTrue(_ArrayHas(g.missingVolumes, "archive.7z.001"), "missing_first_listed")
+
+    ; --- missing middle volume in .7z sequence 001..003 without 002 ---
+    siblings := ["archive.7z.001", "archive.7z.003"]
+    g := DetectVolumeGroup(dir "\archive.7z.001", siblings)
+    AssertTrue(g.isVolume, "missing_middle_is_volume")
+    AssertTrue(g.selectedIsFirst, "missing_middle_selected_first")
+    AssertTrue(_ArrayHas(g.missingVolumes, "archive.7z.002"), "missing_middle_lists_002")
+    AssertEq(g.members.Length, 2, "missing_middle_members_present_only")
+
+    ; --- non-volume ordinary file ---
+    siblings := ["readme.txt", "archive.7z"]
+    g := DetectVolumeGroup(dir "\readme.txt", siblings)
+    AssertFalse(g.isVolume, "non_volume_is_false")
+    AssertEq(g.firstPath, "", "non_volume_empty_first")
+    AssertEq(g.members.Length, 0, "non_volume_empty_members")
+    AssertEq(g.missingVolumes.Length, 0, "non_volume_empty_missing")
+    AssertFalse(g.selectedIsFirst, "non_volume_selected_not_first")
+
+    ; --- single .7z.001 alone: is volume, first, no fabricated extra missing beyond none ---
+    siblings := ["solo.7z.001"]
+    g := DetectVolumeGroup(dir "\solo.7z.001", siblings)
+    AssertTrue(g.isVolume, "solo_001_is_volume")
+    AssertTrue(g.selectedIsFirst, "solo_001_is_first")
+    AssertEq(g.firstPath, dir "\solo.7z.001", "solo_001_first_path")
+    AssertEq(g.members.Length, 1, "solo_001_one_member")
+    AssertEq(g.missingVolumes.Length, 0, "solo_001_no_fabricated_missing")
+
+    ; --- incomplete rXX without inventing huge ranges when only r00 present and base missing ---
+    siblings := ["set.r00"]
+    g := DetectVolumeGroup(dir "\set.r00", siblings)
+    AssertTrue(g.isVolume, "orphan_r00_is_volume")
+    AssertFalse(g.selectedIsFirst, "orphan_r00_not_first")
+    AssertEq(g.firstPath, dir "\set.rar", "orphan_r00_derives_rar_first")
+    AssertTrue(_ArrayHas(g.missingVolumes, "set.rar"), "orphan_r00_missing_base_rar")
+    AssertFalse(_ArrayHas(g.missingVolumes, "set.r99"), "orphan_r00_does_not_fabricate_r99")
 }
 
 summary := "SUMMARY passed=" passCount " failed=" failCount

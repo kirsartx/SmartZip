@@ -171,3 +171,315 @@ RedactDiagnostic(text, includeFullPath := true) {
     }
     return s
 }
+
+DetectVolumeGroup(path, siblingNames) {
+    empty := { isVolume: false, firstPath: "", members: [], missingVolumes: [], selectedIsFirst: false }
+    if (path = "")
+        return empty
+
+    SplitPath(path, &selName, &dir)
+    if (selName = "")
+        return empty
+
+    names := []
+    if (siblingNames is Array) {
+        for n in siblingNames {
+            if (n != "")
+                names.Push(String(n))
+        }
+    }
+    nameSet := Map()
+    for n in names
+        nameSet[StrLower(n)] := n
+
+    sel := selName
+    selLower := StrLower(sel)
+
+    ; Pattern A: name.partNN.rar
+    if (RegExMatch(sel, "i)^(.+)\.part(\d+)\.rar$", &mPart)) {
+        base := mPart[1]
+        width := StrLen(mPart[2])
+        selIndex := Integer(mPart[2])
+        firstName := base ".part" Format("{:0" width "}", 1) ".rar"
+        indices := []
+        indexToName := Map()
+        for n in names {
+            if (RegExMatch(n, "i)^" _VolEscape(base) "\.part(\d+)\.rar$", &mm)) {
+                idx := Integer(mm[1])
+                indices.Push(idx)
+                indexToName[idx] := n
+            }
+        }
+        if (!indexToName.Has(selIndex)) {
+            indices.Push(selIndex)
+            indexToName[selIndex] := sel
+        }
+        return _VolBuildNumericGroup(dir, firstName, sel, selIndex, 1, indices, indexToName)
+    }
+
+    ; Pattern B: name.rNN (old-style RAR volumes; base is name.rar)
+    if (RegExMatch(sel, "i)^(.+)\.r(\d+)$", &mR) && !(selLower ~= "i)\.rar$")) {
+        base := mR[1]
+        width := StrLen(mR[2])
+        selIndex := Integer(mR[2]) + 1  ; r00 => index 1 (second volume); rar base is index 0
+        firstName := base ".rar"
+        indices := []
+        indexToName := Map()
+        if (nameSet.Has(StrLower(firstName))) {
+            indices.Push(0)
+            indexToName[0] := nameSet[StrLower(firstName)]
+        } else {
+            ; still record expected first even if missing
+        }
+        for n in names {
+            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm)) {
+                idx := Integer(mm[1]) + 1
+                indices.Push(idx)
+                indexToName[idx] := n
+            }
+        }
+        if (!indexToName.Has(selIndex)) {
+            indices.Push(selIndex)
+            indexToName[selIndex] := sel
+        }
+        ; selectedIsFirst is never true for .rNN
+        members := []
+        missing := []
+        if (!nameSet.Has(StrLower(firstName)))
+            missing.Push(firstName)
+        maxIndex := selIndex
+        for idx in indices
+            if (idx > maxIndex)
+                maxIndex := idx
+        idx := 1
+        while (idx <= maxIndex) {
+            if !indexToName.Has(idx)
+                missing.Push(base ".r" Format("{:0" width "}", idx - 1))
+            idx++
+        }
+        ; present members sorted: base (0) then r00,r01,...
+        if (indexToName.Has(0))
+            members.Push(dir "\" indexToName[0])
+        sortedExtra := []
+        for n in names {
+            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm))
+                sortedExtra.Push([Integer(mm[1]), n])
+        }
+        ; sort by r-number ascending (simple insertion)
+        i := 1
+        while (i <= sortedExtra.Length) {
+            j := i
+            while (j > 1 && sortedExtra[j][1] < sortedExtra[j - 1][1]) {
+                tmp := sortedExtra[j - 1]
+                sortedExtra[j - 1] := sortedExtra[j]
+                sortedExtra[j] := tmp
+                j--
+            }
+            i++
+        }
+        for pair in sortedExtra
+            members.Push(dir "\" pair[2])
+        if (!nameSet.Has(selLower) && sel != "")
+        {
+            ; ensure selected path appears if not in siblings list
+            foundSel := false
+            for mem in members {
+                SplitPath(mem, &mn)
+                if (StrLower(mn) = selLower) {
+                    foundSel := true
+                    break
+                }
+            }
+            if (!foundSel)
+                members.Push(dir "\" sel)
+        }
+        return {
+            isVolume: true,
+            firstPath: dir "\" firstName,
+            members: members,
+            missingVolumes: missing,
+            selectedIsFirst: false
+        }
+    }
+
+    ; Pattern C: name.rar that has sibling name.r00 or is alone but we only mark volume if rXX siblings exist
+    if (RegExMatch(sel, "i)^(.+)\.rar$", &mBase) && !(selLower ~= "i)\.part\d+\.rar$")) {
+        base := mBase[1]
+        hasR := false
+        for n in names {
+            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$")) {
+                hasR := true
+                break
+            }
+        }
+        if (hasR) {
+            firstName := base ".rar"
+            members := []
+            if (nameSet.Has(StrLower(firstName)))
+                members.Push(dir "\" nameSet[StrLower(firstName)])
+            else
+                members.Push(dir "\" firstName)
+            sortedExtra := []
+            for n in names {
+                if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm))
+                    sortedExtra.Push([Integer(mm[1]), n])
+            }
+            i := 1
+            while (i <= sortedExtra.Length) {
+                j := i
+                while (j > 1 && sortedExtra[j][1] < sortedExtra[j - 1][1]) {
+                    tmp := sortedExtra[j - 1]
+                    sortedExtra[j - 1] := sortedExtra[j]
+                    sortedExtra[j] := tmp
+                    j--
+                }
+                i++
+            }
+            maxR := -1
+            for pair in sortedExtra {
+                members.Push(dir "\" pair[2])
+                if (pair[1] > maxR)
+                    maxR := pair[1]
+            }
+            missing := []
+            if (!nameSet.Has(StrLower(firstName)))
+                missing.Push(firstName)
+            if (maxR >= 0) {
+                r := 0
+                while (r <= maxR) {
+                    rn := base ".r" Format("{:02}", r)
+                    ; keep original width if siblings use 2 digits; Format 02 matches r00 style
+                    if (!nameSet.Has(StrLower(rn))) {
+                        ; also try without forcing width from observed sibling
+                        foundWidth := false
+                        for n in names {
+                            if (RegExMatch(n, "i)^" _VolEscape(base) "\.r(\d+)$", &mm) && Integer(mm[1]) = r) {
+                                foundWidth := true
+                                break
+                            }
+                        }
+                        if (!foundWidth)
+                            missing.Push(base ".r" Format("{:02}", r))
+                    }
+                    r++
+                }
+            }
+            return {
+                isVolume: true,
+                firstPath: dir "\" firstName,
+                members: members,
+                missingVolumes: missing,
+                selectedIsFirst: true
+            }
+        }
+    }
+
+    ; Pattern D: name.ext.NNN  (e.g. .7z.001, .zip.001) OR bare name.NNN (name.001)
+    if (RegExMatch(sel, "i)^(.+)\.(\d+)$", &mNum)) {
+        stem := mNum[1]          ; may include .7z / .zip or plain stem
+        digits := mNum[2]
+        width := StrLen(digits)
+        selIndex := Integer(digits)
+        firstName := stem "." Format("{:0" width "}", 1)
+        indices := []
+        indexToName := Map()
+        for n in names {
+            if (RegExMatch(n, "i)^" _VolEscape(stem) "\.(\d+)$", &mm) && StrLen(mm[1]) = width) {
+                idx := Integer(mm[1])
+                indices.Push(idx)
+                indexToName[idx] := n
+            }
+        }
+        if (!indexToName.Has(selIndex)) {
+            indices.Push(selIndex)
+            indexToName[selIndex] := sel
+        }
+        return _VolBuildNumericGroup(dir, firstName, sel, selIndex, 1, indices, indexToName)
+    }
+
+    return empty
+}
+
+_VolEscape(s) {
+    out := ""
+    Loop Parse s {
+        ch := A_LoopField
+        if (InStr("\.\+\*\?\[\]\(\)\{\}\^\$\|", ch))
+            out .= "\" ch
+        else
+            out .= ch
+    }
+    return out
+}
+
+_VolBuildNumericGroup(dir, firstName, selName, selIndex, firstIndex, indices, indexToName) {
+    nameSet := Map()
+    for idx, n in indexToName
+        nameSet[StrLower(n)] := n
+
+    ; unique sort indices
+    uniq := []
+    seen := Map()
+    for idx in indices {
+        if (!seen.Has(idx)) {
+            seen[idx] := true
+            uniq.Push(idx)
+        }
+    }
+    i := 1
+    while (i <= uniq.Length) {
+        j := i
+        while (j > 1 && uniq[j] < uniq[j - 1]) {
+            tmp := uniq[j - 1]
+            uniq[j - 1] := uniq[j]
+            uniq[j] := tmp
+            j--
+        }
+        i++
+    }
+
+    maxIndex := uniq.Length ? uniq[uniq.Length] : selIndex
+    if (selIndex > maxIndex)
+        maxIndex := selIndex
+
+    width := 0
+    partSuffix := ""
+    if (RegExMatch(firstName, "i)^(.+\.part)(\d+)(\.rar)$", &mp)) {
+        stem := mp[1]
+        width := StrLen(mp[2])
+        partSuffix := mp[3]
+    } else if (RegExMatch(firstName, "\.(\d+)$", &mw)) {
+        width := StrLen(mw[1])
+    }
+    if (width = 0)
+        width := 3
+
+    if (partSuffix = "") {
+        stem := ""
+        if (RegExMatch(firstName, "i)^(.+)\.(\d+)$", &ms))
+            stem := ms[1]
+    }
+
+    members := []
+    missing := []
+    idx := firstIndex
+    while (idx <= maxIndex) {
+        nm := stem (partSuffix = "" ? "." : "") Format("{:0" width "}", idx) partSuffix
+        if (indexToName.Has(idx)) {
+            members.Push(dir "\" indexToName[idx])
+        } else if (idx != selIndex) {
+            missing.Push(nm)
+        } else {
+            members.Push(dir "\" selName)
+        }
+        idx++
+    }
+
+    return {
+        isVolume: true,
+        firstPath: dir "\" firstName,
+        members: members,
+        missingVolumes: missing,
+        selectedIsFirst: (selIndex = firstIndex)
+    }
+}
