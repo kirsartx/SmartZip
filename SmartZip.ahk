@@ -30,6 +30,7 @@ if A_Args.Length
 else
     Setting
 
+#Include lib\ArchiveDiagnostics.ahk
 class SmartZip
 {
     __New(sevenZipDir)
@@ -220,6 +221,8 @@ class SmartZip
     Unzip(loopPath := "")
     {
         if !loopPath
+            this.processedVolumeFirst := Map()
+        if !loopPath
         {
             arr := this.arr
             this.autoAddPass := ini.autoAddPass
@@ -240,7 +243,7 @@ class SmartZip
             if targetDir && DirExist(targetDir)
                 SetWorkingDir(this.defaultDir := targetDir)
 
-            this.password := ["", ini.lastPass, FormatPassword(A_Clipboard)]
+            this.password := ["", ini.lastPass, this.FormatPassword(A_Clipboard)]
 
             ini.ReadLoop("password", this.password)
 
@@ -377,183 +380,75 @@ class SmartZip
 
             pass := ""
             this.continue := false
+            this.error := true
 
-            for i in this.password
-            {
-                if A_Index = 1
-                {
-                    this.isFile := this.isCmdReturn := false
-                    this.needPass := 4
-                    cmdArgs := this.7z ' l -slt -bsp1  "' path '"'
-                    if this.cmdLog
-                        this.testLog .= '`n#####`n' cmdArgs '`n'
-                    this.RunCmd(cmdArgs, , CheckEncrypted)
-
-                    switch this.needPass
-                    {
-                        case 0: break
-                        case 1: continue
-                        case 2:
-                        {
-                            for n in this.password
-                            {
-                                if n
-                                {
-                                    this.isFile := this.isCmdReturn := false
-                                    this.needPass := 5
-                                    cmdArgs := this.7z ' l -slt -bsp1 -p"' n '" "' path '"'
-                                    this.RunCmd(cmdArgs, , CheckEncrypted)
-                                    if this.cmdLog
-                                        this.testLog .= '`n#####`n' cmdArgs '`n'
-                                    if this.needPass = 1
-                                    {
-                                        this.error := 0
-                                        pass := ' -p"' AddPass(n) '"'
-                                        break 2
-                                    }
-                                }
-                            }
-                        }
-                        case 3: return
-                    }
-                }
-
-                this.CheckCMD(, this.7z ' t -bsp1 "' path '" -p"' i '"')
-
-                if this.continue
+            SplitPath(path, &selectedName, &selectedDir)
+            siblingNames := []
+            loop files selectedDir "\*.*", "F"
+                siblingNames.Push(A_LoopFileName)
+            volume := DetectVolumeGroup(path, siblingNames)
+            if volume.isVolume {
+                key := StrLower(volume.firstPath)
+                if !this.HasOwnProp("processedVolumeFirst")
+                    this.processedVolumeFirst := Map()
+                if this.processedVolumeFirst.Has(key) {
+                    this.error := false  ; intentional duplicate member skip, not an extraction failure
                     return
-
-                if !this.error
-                {
-                    if i
-                        pass := ' -p"' AddPass(i) '"'
-                    break
                 }
+                if (volume.missingVolumes.Length || !FileExist(volume.firstPath)) {
+                    missing := ArchiveResult(ArchiveStatus.MISSING_VOLUME, "probe", 2, path)
+                    missing.volumeFirst := volume.firstPath
+                    missing.missingVolumes := volume.missingVolumes
+                    return missing
+                }
+                this.processedVolumeFirst[key] := true
+                path := volume.firstPath
             }
 
-            if !this.needPass || !this.error	;密码正确或无需密码
-            {
+            probe := this.ProbeArchive(path)
+            if volume.isVolume
+                probe.volumeFirst := volume.firstPath
+            if this.logLevel
+                this.Loging("probe status=" probe.status " exit=" probe.exitCode, A_LineNumber, 4)
+
+            resolved := this.ResolveArchivePassword(path, probe)
+            if this.logLevel
+                this.Loging("resolve status=" resolved.status " exit=" resolved.exitCode, A_LineNumber, 4)
+
+            ; Non-success preflight: never delete source; skip extract (Task 5 owns partial dirs)
+            if (resolved.status != ArchiveStatus.OK && resolved.status != ArchiveStatus.OK_WITH_WARNING) {
+                this.error := true
+                if (resolved.status = ArchiveStatus.CANCELLED)
+                    this.exitCode := 255
+                return
+            }
+
+            this.error := false
+            if (resolved.passwordUsed != "")
+                pass := ' -p"' resolved.passwordUsed '"'
+
+            ; OK_WITH_WARNING from probe/test still extracts; mayDeleteSource remains false on result
+            ; (Task 5 enforces mayDeleteSource at finalize — do not delete here on warning)
+            ; Two extract invocations preserve excludeArgs consumption on both passworded and
+            ; non-passworded paths (prior dual-path contract; GUI password scrape removed).
+            if (pass != "")
                 this.Run7z(hideBool, 'x', path, '" -aou -o' tmpDir pass this.excludeArgs this.codePage, hideBool || this.guiShow, () => IsSuccess(), A_LineNumber)
+            else
+                this.Run7z(hideBool, 'x', path, '" -aou -o' tmpDir this.excludeArgs this.codePage, hideBool || this.guiShow, () => IsSuccess(), A_LineNumber)
 
-                if IsSuccess()
-                {
-                    if part != -1
-                        return
-                    if loopPath
-                        this.RecycleItem(path, A_LineNumber, true)
-                    else if this.delSource || (pass && this.delWhenHasPass)
-                        this.RecycleItem(path, A_LineNumber)
-                }
-            } else
+            if IsSuccess()
             {
-                this.tryPasssword := ""
-                if this.autoAddPass
-                    SetTimer(TrackPass, 10)
-                this.Run7z(false, 'x', path, '" -aou -o' tmpDir this.excludeArgs this.codePage, , () => IsSuccess(), A_LineNumber)
-                SetTimer(TrackPass, 0), ToolTip()
-
-                if this.tryPasssword && this.exitCode != 255
-                {
-                    this.error := true
-                    this.CheckCMD(, this.7z ' t -bsp1 "' path '" -p"' this.tryPasssword '"')
-                    if !this.error
-                        AddPass(this.tryPasssword)
-                }
-
-                if IsSuccess() && part = -1 && this.delWhenHasPass
-                    this.RecycleItem(path, A_LineNumber)	;密码错误需手动输入密码
-            }
-
-            TrackPass()
-            {
-                title := "ahk_pid " this.pid
-                if WinExist(title) && WinActive(title)
-                {
-                    try
-                        if InStr(ControlGetText("Button1", title), "&S")
-                        {
-                            if !ControlGetChecked("Button1", title)
-                                return (this.tryPasssword := "", ToolTip())
-                        } else if !ControlGetText("Static14", title)
-                            return (SetTimer(TrackPass, 0), ToolTip())
-
-                    try
-                        if (str := ControlGetText("Edit1", title))
-                            this.tryPasssword := str
-
-                    try
-                        if ControlGetText("Static14", title)
-                            this.tryPasssword := ""
-
-                    if this.tryPasssword
-                        ToolTip "当前密码 : " this.tryPasssword
-                } else
-                    ToolTip()
-            }
-
-            AddPass(pass)
-            {
-                static notLoopPass := ""	;用以确保嵌套和源文件同密码时不会重复记录
-
-                if !pass
+                if volume.isVolume
                     return
-
-                if !loopPath
-                    notLoopPass := pass
-                else if pass = notLoopPass
-                    return pass
-
-                if ini.lastPass != pass
-                    ini.Write(pass, "lastPass", "temp")
-
-                if this.dynamicPassSort || this.autoAddPass
-                {
-                    if !this.passwordMap.Has(pass) && this.password.Length > 2 && this.password[3] = pass
-                        return pass
-
-                    if !this.passwordMap.Has(pass)
-                    {
-                        this.dynamicPassArr.Push([pass, 0]), this.passwordMap[pass] := this.dynamicPassArr.Length
-                        if this.autoAddPass
-                            ini.Write(pass, this.passwordMap.Count, "password")
-                    } else
-                        this.dynamicPassArr[this.passwordMap[pass]][2]++
-                }
-                return pass
-            }
-
-            CheckEncrypted(LineNum, Line)
-            {
-                if this.isCmdReturn
+                ; Warning status must not handle source even if IsSuccess still size-based (Task 5 removes size gate).
+                if (resolved.status = ArchiveStatus.OK_WITH_WARNING)
                     return
-
-                if this.cmdLog
-                    this.testLog .= "[" LineNum "] " line '`n'
-
-                if !this.isFile && InStr(Line, "Attributes = A") || Line ~= "CRC = [A-Z0-9]+"
-                    this.isFile := true
-                else if this.isFile && InStr(Line, "Attributes = D") || Line ~= "CRC = *?$"
-                    this.isFile := false
-                else if this.isFile && InStr(Line, "Encrypted = -")
-                    LogAndReturn(0, A_LineNumber)
-
-                else if InStr(Line, "Encrypted = +") || InStr(Line, "Wrong password?")
-                    LogAndReturn(1, A_LineNumber)
-                else if InStr(Line, "Enter password (will not be echoed):")
-                    LogAndReturn(2, A_LineNumber)
-                else if this.needPass = 5 && InStr(Line, "Errors: 1")
-                    LogAndReturn(2, A_LineNumber)
-                else if InStr(Line, "Errors: 1") || InStr(Line, "Cannot open the file as archive") || InStr(Line, "Unexpected end of archive")
-                    this.continue := true, LogAndReturn(3, A_LineNumber)
-
-                LogAndReturn(num := "", logLineNum := "")
-                {
-                    this.isCmdReturn := true
-                    this.needPass := num
-                    ProcessClose(this.CMDPID), ProcessWaitClose(this.CMDPID)
-                    this.CMDPID := 0
-                    this.Loging(cmdArgs '`n[' LineNum '] ' line, logLineNum, this.needPass > 2 ? 3 : 4)
-                }
+                ; Interim Task 4 behavior is Recycle Bin only for every source archive.
+                ; Task 5 replaces this whole block with the clean-success state machine.
+                if loopPath
+                    this.RecycleItem(path, A_LineNumber, false)
+                else if this.delSource || (pass && this.delWhenHasPass)
+                    this.RecycleItem(path, A_LineNumber, false)
             }
 
             IsSuccess()
@@ -712,8 +607,6 @@ class SmartZip
             else
                 ini.Write(, index, "password"), ini.Write(, index, "passwordSort")
         }
-
-        FormatPassword(str) => StrLen(str) < 100 ? Trim(RegExReplace(str, "(\R*)")) : ""	;移除所有换行符及首尾所有空格或制表符
     }
 
     OpenZip()
@@ -1271,6 +1164,164 @@ class SmartZip
 
         return false
     }
+
+    ProbeArchive(path) {
+        cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 "' path '"'
+        if this.cmdLog
+            this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+        cap := this.RunCmdCapture(cmd, "UTF-8")
+        return Classify7zResult("probe", cap.exitCode, cap.output, path)
+    }
+
+    TestArchive(path, password := "") {
+        cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
+        if this.cmdLog
+            this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+        cap := this.RunCmdCapture(cmd, "UTF-8")
+        result := Classify7zResult("test", cap.exitCode, cap.output, path)
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+            result.passwordUsed := password
+        return result
+    }
+
+    BuildPasswordCandidates(path) {
+        out := []
+        seen := Map()
+        add(p) {
+            if (p = "")
+                return
+            key := (p = "") ? "__EMPTY__" : String(p)
+            if seen.Has(key)
+                return
+            seen[key] := true
+            out.Push(p)
+        }
+        ; Prefer instance lastPass when present (harness host); production uses ini.lastPass.
+        lastPass := this.HasOwnProp("lastPass") ? this.lastPass : ini.lastPass
+        if (lastPass != "")
+            add(lastPass)
+        clip := this.FormatPassword(this.GetClipboardText())
+        if (clip != "")
+            add(clip)
+        if (this.dynamicPassSort || this.autoAddPass) {
+            arr := []
+            if this.HasProp("dynamicPassArr") {
+                for item in this.dynamicPassArr {
+                    if (item is Array)
+                        arr.Push([item[1], item[2]])
+                    else
+                        arr.Push([item, 0])
+                }
+            }
+            ; sort copy by usage count desc; do not reorder this.dynamicPassArr here (PasswordSort still owns persistence)
+            i := 0
+            while (++i <= arr.Length) {
+                j := 0
+                while (++j <= arr.Length - i) {
+                    if arr[j][2] < arr[j + 1][2] {
+                        tmp := arr[j]
+                        arr[j] := arr[j + 1]
+                        arr[j + 1] := tmp
+                    }
+                }
+            }
+            for item in arr
+                add(item[1])
+        } else if this.HasProp("password") {
+            for p in this.password
+                add(p)
+        }
+        if this.addDir2Pass {
+            SplitPath(path, , &dir)
+            ; Normalize doubled separators (AHK v2 "C:\\a\\b" literals) then take leaf folder name.
+            dir := RTrim(RegExReplace(dir, "\\+", "\"), "\")
+            parent := RegExReplace(dir, ".+\\")
+            if (parent != "")
+                add(parent)
+        }
+        return out
+    }
+
+    ResolveArchivePassword(path, probeResult) {
+        st := probeResult.status
+        if (st != ArchiveStatus.NEED_PASSWORD && st != ArchiveStatus.WRONG_PASSWORD)
+            return probeResult
+
+        emptyTry := this.TestArchive(path, "")
+        if (emptyTry.status = ArchiveStatus.OK || emptyTry.status = ArchiveStatus.OK_WITH_WARNING)
+            return emptyTry
+        if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD)
+            return emptyTry
+
+        for pwd in this.BuildPasswordCandidates(path) {
+            r := this.TestArchive(path, pwd)
+            if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING)
+                return r
+            if (r.status = ArchiveStatus.CANCELLED)
+                return r
+            if (r.status != ArchiveStatus.NEED_PASSWORD && r.status != ArchiveStatus.WRONG_PASSWORD)
+                return r	; non-password status: stop iterating
+        }
+
+        dlg := this.ShowPasswordDialog(path)
+        if (dlg.action = "cancel" || dlg.password = "")
+            return ArchiveResult(ArchiveStatus.CANCELLED, "password", -1, path, "")
+
+        r := this.TestArchive(path, dlg.password)
+        if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
+            if (dlg.action = "save")
+                this.RememberPassword(dlg.password)
+            ; "本次使用" does not persist
+            return r
+        }
+        if (r.status = ArchiveStatus.NEED_PASSWORD || r.status = ArchiveStatus.WRONG_PASSWORD)
+            return r  ; submitted-but-wrong stays diagnosable; only explicit cancel is CANCELLED
+        return r
+    }
+
+    ShowPasswordDialog(path) {
+        result := { action: "cancel", password: "" }
+        SplitPath(path, &name)
+        g := Gui("+AlwaysOnTop -MinimizeBox", "SmartZip 需要密码")
+        g.AddText("w280", "文件: " name)
+        g.AddText("w280", "请输入密码:")
+        edit := g.AddEdit("w280 Password")
+        btnRow := g.AddButton("w90 Default", "本次使用")
+        btnSave := g.AddButton("x+8 w90", "使用并保存")
+        btnCancel := g.AddButton("x+8 w90", "取消")
+        btnRow.OnEvent("Click", (*) => (result.action := "use", result.password := edit.Value, g.Destroy()))
+        btnSave.OnEvent("Click", (*) => (result.action := "save", result.password := edit.Value, g.Destroy()))
+        btnCancel.OnEvent("Click", (*) => (result.action := "cancel", result.password := "", g.Destroy()))
+        g.OnEvent("Close", (*) => (result.action := "cancel", result.password := "", g.Destroy()))
+        g.Show("AutoSize Center")
+        WinWaitClose(g.Hwnd)
+        return result
+    }
+
+    RememberPassword(password) {
+        if !password
+            return password
+        if ini.lastPass != password
+            ini.Write(password, "lastPass", "temp")
+        if this.dynamicPassSort || this.autoAddPass {
+            if !this.HasProp("passwordMap")
+                this.passwordMap := Map()
+            if !this.HasProp("dynamicPassArr")
+                this.dynamicPassArr := []
+            if !this.passwordMap.Has(password) {
+                this.dynamicPassArr.Push([password, 0])
+                this.passwordMap[password] := this.dynamicPassArr.Length
+                if this.autoAddPass
+                    ini.Write(password, this.passwordMap.Count, "password")
+            } else
+                this.dynamicPassArr[this.passwordMap[password]][2]++
+        }
+        return password
+    }
+
+    FormatPassword(str) => StrLen(str) < 100 ? Trim(RegExReplace(str, "(\R*)")) : ""
+
+    GetClipboardText() => this.HasOwnProp("clipText") ? this.clipText : A_Clipboard
 
     ; Full stdout+stderr capture for classification. Never kills the process on keyword match.
     ; Returns { exitCode, output, cancelled }. Default code page is UTF-8 for 7-Zip -sccUTF-8 output.

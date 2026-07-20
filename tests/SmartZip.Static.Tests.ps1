@@ -626,3 +626,137 @@ Describe 'RunCmdCaptureSafety' {
         $bad | Should Be $false
     }
 }
+
+$script:ProbeArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    ProbeArchive(" -EndMarker "`n    TestArchive("
+$script:TestArchiveBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    TestArchive(" -EndMarker "`n    BuildPasswordCandidates("
+$script:BuildPasswordCandidatesBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    BuildPasswordCandidates(" -EndMarker "`n    ResolveArchivePassword("
+$script:ResolveArchivePasswordBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    ResolveArchivePassword(" -EndMarker "`n    ShowPasswordDialog("
+$script:ShowPasswordDialogBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    ShowPasswordDialog(" -EndMarker "`n    RememberPassword("
+$script:RememberPasswordBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    RememberPassword(" -EndMarker "`n    FormatPassword("
+$script:FormatPasswordBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    FormatPassword(" -EndMarker "`n    RunCmdCapture("
+
+Describe 'PasswordPreflightSafety' {
+
+    It 'includes ArchiveDiagnostics library before class SmartZip' {
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            '(?m)^#Include\s+lib\\ArchiveDiagnostics\.ahk\s*$'
+        $ok | Should Be $true
+        $inc = $script:SmartZipSource.IndexOf('#Include lib\ArchiveDiagnostics.ahk')
+        $cls = $script:SmartZipSource.IndexOf('class SmartZip')
+        ($inc -ge 0 -and $cls -gt $inc) | Should Be $true
+    }
+
+    It 'ProbeArchive method exists before TestArchive' {
+        [string]::IsNullOrEmpty($script:ProbeArchiveBody) | Should Be $false
+        $script:ProbeArchiveBody | Should Match 'ProbeArchive\s*\('
+    }
+
+    It 'TestArchive method exists with default empty password' {
+        [string]::IsNullOrEmpty($script:TestArchiveBody) | Should Be $false
+        $ok = Test-Regex -Text $script:TestArchiveBody -Pattern `
+            'TestArchive\s*\(\s*\w+\s*,\s*\w+\s*:=\s*""\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'BuildPasswordCandidates and ResolveArchivePassword methods exist' {
+        [string]::IsNullOrEmpty($script:BuildPasswordCandidatesBody) | Should Be $false
+        [string]::IsNullOrEmpty($script:ResolveArchivePasswordBody) | Should Be $false
+    }
+
+    It 'ShowPasswordDialog has exact buttons 本次使用 使用并保存 取消' {
+        $b = $script:ShowPasswordDialogBody
+        [string]::IsNullOrEmpty($b) | Should Be $false
+        ($b -match '本次使用') | Should Be $true
+        ($b -match '使用并保存') | Should Be $true
+        ($b -match '取消') | Should Be $true
+    }
+
+    It 'ShowPasswordDialog masks password Edit with Password style' {
+        $ok = Test-Regex -Text $script:ShowPasswordDialogBody -Pattern `
+            'AddEdit\([^\)]*Password'
+        $ok | Should Be $true
+    }
+
+    It 'ProbeArchive uses RunCmdCapture and Classify7zResult with stage probe' {
+        $b = $script:ProbeArchiveBody
+        (Test-Regex -Text $b -Pattern 'RunCmdCapture\s*\(') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'Classify7zResult\s*\(\s*"probe"') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'l\s+-slt') | Should Be $true
+        (Test-Regex -Text $b -Pattern '-bso1') | Should Be $true
+        (Test-Regex -Text $b -Pattern '-bse1') | Should Be $true
+        (Test-Regex -Text $b -Pattern '-bsp0') | Should Be $true
+        (Test-Regex -Text $b -Pattern '-sccUTF-8') | Should Be $true
+    }
+
+    It 'TestArchive uses RunCmdCapture Classify7zResult stage test and -p' {
+        $b = $script:TestArchiveBody
+        (Test-Regex -Text $b -Pattern 'RunCmdCapture\s*\(') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'Classify7zResult\s*\(\s*"test"') | Should Be $true
+        (Test-Regex -Text $b -Pattern '(?m)\bt\b.*-bso1|-bso1.*\bt\b| '' t ') | Should Be $true
+        (Test-Regex -Text $b -Pattern '-p"') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'passwordUsed') | Should Be $true
+    }
+
+    It 'cmdLog paths redact diagnostics and never concatenate raw password into log' {
+        $combined = $script:ProbeArchiveBody + $script:TestArchiveBody + $script:ResolveArchivePasswordBody + $script:RememberPasswordBody
+        (Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(') | Should Be $true
+        # Forbid obvious secret leakage patterns in new preflight methods
+        $bad = Test-Regex -Text $combined -Pattern 'Loging\([^\)]*-p"''\s*\w+'
+        $bad | Should Be $false
+        $bad2 = Test-Regex -Text $combined -Pattern 'testLog\s*\.=\s*[^\n]*password[^\n]*"'
+        $bad2 | Should Be $false
+    }
+
+    It 'ResolveArchivePassword short-circuits non-password statuses without TestArchive loop' {
+        $b = $script:ResolveArchivePasswordBody
+        # Must mention NEED_PASSWORD and WRONG_PASSWORD as the only entry to iteration
+        (Test-Regex -Text $b -Pattern 'NEED_PASSWORD') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'WRONG_PASSWORD') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'BuildPasswordCandidates\s*\(') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'ShowPasswordDialog\s*\(') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'CANCELLED') | Should Be $true
+    }
+
+    It 'BuildPasswordCandidates orders non-empty candidates and Resolve tests empty once' {
+        $b = $script:BuildPasswordCandidatesBody
+        $r = $script:ResolveArchivePasswordBody
+        (Test-Regex -Text $b -Pattern 'lastPass') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'FormatPassword\s*\(\s*this\.GetClipboardText\s*\(\s*\)\s*\)') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'dynamicPassArr|password') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'addDir2Pass') | Should Be $true
+        # Empty is excluded from candidates and tested only by ResolveArchivePassword.
+        (Test-Regex -Text $b -Pattern 'Push\(\s*""\s*\)|add\(\s*""\s*\)|candidates\.Push\(\s*""\s*\)') | Should Be $false
+        (Test-Regex -Text $r -Pattern 'TestArchive\s*\(\s*path\s*,\s*""\s*\)') | Should Be $true
+    }
+
+    It 'RememberPassword updates lastPass and dynamic maps without logging the secret' {
+        $b = $script:RememberPasswordBody
+        [string]::IsNullOrEmpty($b) | Should Be $false
+        (Test-Regex -Text $b -Pattern 'lastPass') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'passwordMap|dynamicPassArr') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'Loging\s*\([^\)]*password') | Should Be $false
+    }
+
+    It 'Unzip zipx entry calls ProbeArchive and ResolveArchivePassword' {
+        $u = $script:UnzipBody
+        (Test-Regex -Text $u -Pattern 'ProbeArchive\s*\(') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'ResolveArchivePassword\s*\(') | Should Be $true
+        # Legacy early-kill encrypted probe callback must no longer be the primary entry
+        (Test-Regex -Text $u -Pattern 'CheckEncrypted') | Should Be $false
+    }
+
+    It 'RunCmdCapture still precedes RunCmd after password methods' {
+        $src = $script:SmartZipSource
+        $p = $src.IndexOf("`n    ProbeArchive(")
+        $c = $src.IndexOf("`n    RunCmdCapture(")
+        $r = $src.IndexOf("`n    RunCmd(CmdLine")
+        ($p -ge 0 -and $c -gt $p -and $r -gt $c) | Should Be $true
+    }
+}
