@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 <#
 .SYNOPSIS
   Static regression tests for SmartZip.ahk correctness hotfixes (no AutoHotkey runtime).
@@ -343,11 +343,18 @@ Describe 'ExcludeArgsBuildAndConsume' {
     }
 
     It 'Unzip still consumes excludeArgs on both extraction paths' {
-        $matches = [regex]::Matches(
-            $script:UnzipBody,
-            '(?m)this\.Run7z\([^\r\n]*''x''[^\r\n]*this\.excludeArgs'
-        )
-        ($matches.Count -ge 2) | Should Be $true
+        # After Task 5, extract moves into ExtractArchiveToTemp (single Run7z path).
+        $extractBody = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    ExtractArchiveToTemp(" -EndMarker "`n    FinalizeExtraction("
+        if ([string]::IsNullOrEmpty($extractBody)) {
+            $extractBody = ''
+        }
+        $script:ExtractArchiveToTempBody = $extractBody
+        $ok = Test-Regex -Text $script:ExtractArchiveToTempBody -Pattern `
+            'Run7z\s*\([^\r\n]*[''"]x[''"][^\r\n]*this\.excludeArgs|Run7z\s*\([^\)]*this\.excludeArgs'
+        $ok | Should Be $true
+        $ok2 = Test-Regex -Text $script:UnzipBody -Pattern 'ExtractArchiveToTemp\s*\('
+        $ok2 | Should Be $true
     }
 
     It 'CreateZip all-folder branch appends excludeArgs' {
@@ -758,5 +765,113 @@ Describe 'PasswordPreflightSafety' {
         $c = $src.IndexOf("`n    RunCmdCapture(")
         $r = $src.IndexOf("`n    RunCmd(CmdLine")
         ($p -ge 0 -and $c -gt $p -and $r -gt $c) | Should Be $true
+    }
+}
+
+$script:ExtractArchiveToTempBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    ExtractArchiveToTemp(" -EndMarker "`n    FinalizeExtraction("
+$script:FinalizeExtractionBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    FinalizeExtraction(" -EndMarker "`n    WriteDiagnostic("
+$script:WriteDiagnosticBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    WriteDiagnostic(" -EndMarker "`n    RunCmdCapture("
+
+Describe 'ExtractionLifecycleSafety' {
+
+    It 'ExtractArchiveToTemp FinalizeExtraction WriteDiagnostic methods exist in order' {
+        [string]::IsNullOrEmpty($script:ExtractArchiveToTempBody) | Should Be $false
+        [string]::IsNullOrEmpty($script:FinalizeExtractionBody) | Should Be $false
+        [string]::IsNullOrEmpty($script:WriteDiagnosticBody) | Should Be $false
+        $e = $script:SmartZipSource.IndexOf('ExtractArchiveToTemp(')
+        $f = $script:SmartZipSource.IndexOf('FinalizeExtraction(')
+        $w = $script:SmartZipSource.IndexOf('WriteDiagnostic(')
+        ($e -ge 0 -and $f -gt $e -and $w -gt $f) | Should Be $true
+    }
+
+    It 'ExtractArchiveToTemp uses Run7z extract and Classify7zResult stage extract' {
+        $script:ExtractArchiveToTempBody | Should Match 'Run7z\s*\('
+        $script:ExtractArchiveToTempBody | Should Match "['`"]x['`"]"
+        $ok = Test-Regex -Text $script:ExtractArchiveToTempBody -Pattern `
+            'Classify7zResult\s*\(\s*["'']extract["'']'
+        $ok | Should Be $true
+    }
+
+    It 'ExtractArchiveToTemp reclassifies non-zero extract via console test capture' {
+        $ok = Test-Regex -Text $script:ExtractArchiveToTempBody -Pattern `
+            'RunCmdCapture\s*\('
+        $ok | Should Be $true
+        $script:ExtractArchiveToTempBody | Should Match '\bt\b'
+        $script:ExtractArchiveToTempBody | Should Match '255'
+    }
+
+    It 'no IsSuccess size or successPercent authorization remains' {
+        $script:UnzipBody | Should Not Match 'IsSuccess\s*\('
+        $script:SmartZipSource | Should Not Match '(?s)IsSuccess\s*\(\s*\)\s*\{[^}]*succesSpercent'
+        $script:ExtractArchiveToTempBody | Should Not Match 'succesSpercent|successPercent|GetFolder\s*\(\s*tmpDir\s*\)\s*\.Size|folderSize\s*/\s*this\.currentSize'
+        $script:FinalizeExtractionBody | Should Not Match 'succesSpercent|successPercent|folderSize\s*/\s*this\.currentSize'
+    }
+
+    It 'FinalizeExtraction encodes partial dir name 解压不完整 and diagnostic file' {
+        $script:FinalizeExtractionBody | Should Match '解压不完整'
+        $script:FinalizeExtractionBody | Should Match 'yyyyMMdd-HHmmss'
+        $script:FinalizeExtractionBody | Should Match 'PathDupl\s*\('
+        $script:FinalizeExtractionBody | Should Match 'DirMove\s*\('
+        $ok = Test-Regex -Text $script:FinalizeExtractionBody -Pattern 'WriteDiagnostic\s*\('
+        $ok | Should Be $true
+        $script:WriteDiagnosticBody | Should Match 'SmartZip-诊断\.txt'
+        $script:WriteDiagnosticBody | Should Match 'RedactDiagnostic\s*\('
+    }
+
+    It 'FinalizeExtraction preserves source on warning and never permanently deletes a source path' {
+        $script:FinalizeExtractionBody | Should Match 'OK_WITH_WARNING'
+        $script:FinalizeExtractionBody | Should Match 'mayDeleteSource'
+        $script:FinalizeExtractionBody | Should Match 'RecycleItem\s*\('
+        # No source archive path may force permanent delete (delete:=true).
+        $ok = Test-Regex -Text $script:FinalizeExtractionBody -Pattern `
+            'RecycleItem\s*\(\s*path\s*,\s*[^,]+,\s*true\s*\)'
+        $ok | Should Be $false
+        $script:FinalizeExtractionBody | Should Match 'FileRecycle|delete\s*:=\s*false|RecycleItem\s*\(\s*path\s*,'
+        # Permanent cleanup remains allowed only for the SmartZip-created tempDir.
+        $script:FinalizeExtractionBody | Should Match 'RecycleItem\s*\(\s*tempDir\s*,[^\n]*true'
+    }
+
+    It 'zipx calls ExtractArchiveToTemp and FinalizeExtraction' {
+        $ok = Test-Regex -Text $script:UnzipBody -Pattern 'ExtractArchiveToTemp\s*\('
+        $ok2 = Test-Regex -Text $script:UnzipBody -Pattern 'FinalizeExtraction\s*\('
+        $ok3 = Test-Regex -Text $script:UnzipBody -Pattern 'TestArchive\s*\('
+        $ok4 = Test-Regex -Text $script:UnzipBody -Pattern 'forceTest\s*:=\s*this\.test\s*\|\|\s*mayHandleSource\s*\|\|\s*nestedMayRecycle'
+        $ok5 = Test-Regex -Text $script:UnzipBody -Pattern '!\s*volume\.isVolume'
+        ($ok -and $ok2 -and $ok3 -and $ok4 -and $ok5) | Should Be $true
+        $script:UnzipBody | Should Match 'nestedMayRecycle\s*&&\s*extractResult\.isCleanSuccess'
+        $script:UnzipBody | Should Not Match 'RecycleItem\s*\(\s*path\s*,[^\n]*true'
+    }
+
+    It 'Run7z still launches 7zG and exactPid reset unchanged' {
+        $script:Run7zBody | Should Match '7zG'
+        $script:Run7zBody | Should Match 'exactPid'
+        $script:Run7zBody | Should Match 'this\.query\s*:='
+    }
+
+    It 'WriteDiagnostic never logs raw password material' {
+        $script:WriteDiagnosticBody | Should Not Match 'passwordUsed'
+        $script:WriteDiagnosticBody | Should Match 'RedactDiagnostic'
+        $script:WriteDiagnosticBody | Should Match '7-Zip|sevenZipVersion'
+        $script:WriteDiagnosticBody | Should Match '4096'
+    }
+
+    It 'volume and cancel paths do not authorize source handling in FinalizeExtraction' {
+        # mayDeleteSource must gate any path RecycleItem; CANCELLED must not force delete
+        $script:FinalizeExtractionBody | Should Match 'mayDeleteSource'
+        $script:FinalizeExtractionBody | Should Not Match 'RecycleItem\s*\(\s*path\s*,[^\n]*CANCELLED'
+    }
+
+    It 'partial diagnostic name and PathDupl used' {
+        $script:FinalizeExtractionBody | Should Match 'PathDupl\s*\('
+        $script:FinalizeExtractionBody | Should Match 'DirMove|MoveItem'
+    }
+
+    It 'successPercent assignment may still load but must not gate extract success' {
+        # Field may remain until Task 6 deprecates UI; must not appear in extract/finalize decision
+        $script:ExtractArchiveToTempBody | Should Not Match 'successPercent|succesSpercent'
+        $script:FinalizeExtractionBody | Should Not Match 'successPercent|succesSpercent'
     }
 }

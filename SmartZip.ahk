@@ -378,7 +378,6 @@ class SmartZip
             if this.logLevel
                 this.log .= '`n#####`n' path '`n'
 
-            pass := ""
             this.continue := false
             this.error := true
 
@@ -424,70 +423,56 @@ class SmartZip
             }
 
             this.error := false
-            if (resolved.passwordUsed != "")
-                pass := ' -p"' resolved.passwordUsed '"'
 
-            ; OK_WITH_WARNING from probe/test still extracts; mayDeleteSource remains false on result
-            ; (Task 5 enforces mayDeleteSource at finalize — do not delete here on warning)
-            ; Two extract invocations preserve excludeArgs consumption on both passworded and
-            ; non-passworded paths (prior dual-path contract; GUI password scrape removed).
-            if (pass != "")
-                this.Run7z(hideBool, 'x', path, '" -aou -o' tmpDir pass this.excludeArgs this.codePage, hideBool || this.guiShow, () => IsSuccess(), A_LineNumber)
-            else
-                this.Run7z(hideBool, 'x', path, '" -aou -o' tmpDir this.excludeArgs this.codePage, hideBool || this.guiShow, () => IsSuccess(), A_LineNumber)
-
-            if IsSuccess()
-            {
-                if volume.isVolume
+            ; test=0 still forces a full integrity test before configured source handling
+            mayHandleSource := (!loopPath) && !volume.isVolume
+                && (this.delSource || (resolved.passwordUsed != "" && this.delWhenHasPass))
+            nestedMayRecycle := loopPath && !volume.isVolume
+                && (resolved.status = ArchiveStatus.OK)
+            forceTest := this.test || mayHandleSource || nestedMayRecycle
+            if (forceTest) {
+                tr := this.TestArchive(path, resolved.passwordUsed)
+                if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
+                    mayHandleSource := false
+                    nestedMayRecycle := false
+                } else if (tr.status != ArchiveStatus.OK) {
+                    this.error := true
+                    if (tr.status = ArchiveStatus.CANCELLED)
+                        this.exitCode := 255
                     return
-                ; Warning status must not handle source even if IsSuccess still size-based (Task 5 removes size gate).
-                if (resolved.status = ArchiveStatus.OK_WITH_WARNING)
-                    return
-                ; Interim Task 4 behavior is Recycle Bin only for every source archive.
-                ; Task 5 replaces this whole block with the clean-success state machine.
-                if loopPath
-                    this.RecycleItem(path, A_LineNumber, false)
-                else if this.delSource || (pass && this.delWhenHasPass)
-                    this.RecycleItem(path, A_LineNumber, false)
-            }
-
-            IsSuccess()
-            {
-                if !this.exitCode
-                    return true
-
-                if !DirExist(tmpDir)
-                    return false
-
-                if this.exitCode != 255
-                {
-                    folderSize := this.fileSystemObject.GetFolder(tmpDir).Size
-                    this.Loging("文件大小: " this.currentSize " 临时文件夹大小: " folderSize, A_LineNumber)
-
-                    if folderSize >= this.currentSize
-                        return true
-                    else if folderSize / this.currentSize * 100 > this.succesSpercent
-                        return true
                 }
-
-                this.RecycleItem(tmpDir, A_LineNumber, true)
-                return false
             }
+
+            extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
+
+            ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
+            mayDel := false
+            if (resolved.status = ArchiveStatus.OK
+                && extractResult.status = ArchiveStatus.OK
+                && extractResult.exitCode = 0
+                && !volume.isVolume) {
+                if (loopPath)
+                    mayDel := false  ; nested handled below
+                else if mayHandleSource
+                    mayDel := true
+            }
+
+            extractResult := this.FinalizeExtraction(path, extractResult, tmpDir, A_WorkingDir, mayDel)
+
+            ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
+            if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
+                this.RecycleItem(path, A_LineNumber, false)
         }
 
-        ;解压嵌套
+        ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
         UnZipNesting(path, ext)
         {
-            if !this.IsArchive(ext) || !(part := IsPart(path))
+            if !this.IsArchive(ext) || !IsPart(path)
                 return
 
-            timeSave := FileGetTime(path), sizeSave := FileGetSize(path)
             this.exitCode := -1
             this.Unzip(path)
             this.Loging("解压嵌套 <--> " path, A_LineNumber)
-
-            if !this.exitCode && part = -1 && FileExist(path) && FileGetTime(path) = timeSave && FileGetSize(path) = sizeSave	;!exitCode &&
-                this.RecycleItem(path, A_LineNumber)
         }
 
         ; 解压后处理
@@ -1322,6 +1307,119 @@ class SmartZip
     FormatPassword(str) => StrLen(str) < 100 ? Trim(RegExReplace(str, "(\R*)")) : ""
 
     GetClipboardText() => this.HasOwnProp("clipText") ? this.clipText : A_Clipboard
+
+    ExtractArchiveToTemp(path, password, tempDir) {
+        pass := ""
+        if (password != "")
+            pass := ' -p"' password '"'
+        hideBool := false
+        try hideBool := FileGetSize(path) / 1024 / 1024 < this.hideRunSize
+        catch
+            hideBool := false
+
+        this.Run7z(hideBool, 'x', path, '" -aou -o' tempDir pass this.excludeArgs this.codePage,
+            hideBool || this.guiShow, true, A_LineNumber)
+
+        extractExit := this.exitCode
+        result := ""
+        if (extractExit = 0) {
+            result := Classify7zResult("extract", 0, "", path)
+        } else if (extractExit = 255) {
+            result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, path)
+        } else {
+            cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
+            cap := this.RunCmdCapture(cmd, "UTF-8")
+            if this.cmdLog
+                this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+            result := Classify7zResult("extract", extractExit, cap.output, path)
+            result.exitCode := extractExit
+        }
+        result.tempOutputDir := tempDir
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+            result.passwordUsed := password
+        result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
+        result.mayDeleteSource := result.isCleanSuccess
+        return result
+    }
+
+    FinalizeExtraction(path, result, tempDir, targetDir, mayDeleteSource) {
+        ; Clean success requires both OK status and extract exit 0 (never size ratio).
+        result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
+        result.mayDeleteSource := result.isCleanSuccess && mayDeleteSource
+
+        tempHasOutput := false
+        if DirExist(tempDir) {
+            loop files tempDir "\*.*", "DF" {
+                tempHasOutput := true
+                break
+            }
+        }
+
+        if (result.status = ArchiveStatus.OK && result.exitCode = 0) {
+            ; keep tempDir for existing post-zipx MoveItem / AfterUnzip
+            if (mayDeleteSource && result.isCleanSuccess)
+                this.RecycleItem(path, A_LineNumber)  ; Recycle Bin only (delete=false)
+            return result
+        }
+
+        if (result.status = ArchiveStatus.OK_WITH_WARNING) {
+            ; usable output stays in tempDir for movers; never source-handle
+            return result
+        }
+
+        if (tempHasOutput) {
+            SplitPath(path, , , , &nameNoExt)
+            stamp := FormatTime(, "yyyyMMdd-HHmmss")
+            partial := this.PathDupl(targetDir "\" nameNoExt "_解压不完整_" stamp, 1)
+            try DirMove(tempDir, partial)
+            catch {
+                try this.MoveItem(tempDir, partial, 1, A_LineNumber)
+            }
+            result.partialOutputDir := partial
+            this.WriteDiagnostic(result)
+            return result
+        }
+
+        if DirExist(tempDir)
+            this.RecycleItem(tempDir, A_LineNumber, true)
+        return result
+    }
+
+    WriteDiagnostic(result) {
+        baseName := result.archivePath
+        SplitPath(result.archivePath, &baseName)
+        ; IsSet guards: free globals hang AHK load when this method is sliced into harness hosts
+        ; that do not declare MainVersion/edition/buildVersion (e.g. PasswordPreflight fragment).
+        mv := IsSet(MainVersion) ? MainVersion : "unknown"
+        ed := IsSet(edition) ? edition : "unknown"
+        bv := IsSet(buildVersion) ? buildVersion : "unknown"
+        text := "SmartZip diagnostic`r`n"
+            . "smartZipVersion=" mv " " ed " (" bv ")`r`n"
+            . "sevenZipVersion=" (this.HasOwnProp("sevenZipVersion") ? this.sevenZipVersion : "unknown") "`r`n"
+            . "status=" result.status "`r`n"
+            . "stage=" result.stage "`r`n"
+            . "exitCode=" result.exitCode "`r`n"
+            . "archive=" baseName "`r`n"
+        if (result.missingVolumes.Length) {
+            text .= "missingVolumes="
+            for v in result.missingVolumes
+                text .= v ","
+            text .= "`r`n"
+        }
+        for w in result.warningLines
+            text .= "warning: " w "`r`n"
+        for e in result.errorLines
+            text .= "error: " e "`r`n"
+        if (result.output != "")
+            text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        text := RedactDiagnostic(text)
+        if (result.partialOutputDir != "" && DirExist(result.partialOutputDir)) {
+            diagPath := result.partialOutputDir "\SmartZip-诊断.txt"
+            try FileDelete(diagPath)
+            FileAppend(text, diagPath, "UTF-8")
+        }
+        return text
+    }
 
     ; Full stdout+stderr capture for classification. Never kills the process on keyword match.
     ; Returns { exitCode, output, cancelled }. Default code page is UTF-8 for 7-Zip -sccUTF-8 output.
