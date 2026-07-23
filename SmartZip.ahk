@@ -289,11 +289,12 @@ class SmartZip
 
             if this.addDir2Pass
                 SplitPath(i, , &dir), this.password.Push(RegExReplace(dir, ".+\\"))
-            zipx(i)
+            zipResult := zipx(i)
             if this.addDir2Pass
                 this.password.RemoveAt(this.password.Length)
 
-            if !DirExist(tmpDir)	;密码错误以及未输入正确密码
+            ; Kirs.4: only finalized usable output may be promoted into the destination.
+            if (zipResult.outputState != "usable")
                 continue
 
             loop files tmpDir "\*.*", "RDF"
@@ -396,14 +397,14 @@ class SmartZip
                     skipResult := ArchiveResult(ArchiveStatus.OK, "probe", 0, path)
                     skipResult.batchBucket := "skipped"
                     this.ShowDiagnostic(skipResult, isBatch)
-                    return
+                    return skipResult
                 }
                 if (volume.missingVolumes.Length || !FileExist(volume.firstPath)) {
                     missing := ArchiveResult(ArchiveStatus.MISSING_VOLUME, "probe", 2, path)
                     missing.volumeFirst := volume.firstPath
                     missing.missingVolumes := volume.missingVolumes
                     this.ShowDiagnostic(missing, isBatch)
-                    return
+                    return missing
                 }
                 this.processedVolumeFirst[key] := true
                 path := volume.firstPath
@@ -427,14 +428,15 @@ class SmartZip
                         this.exitCode := 255
                     shown := this.ShowDiagnostic(resolved, isBatch)
                     if (!isBatch
-                        && (resolved.status = ArchiveStatus.NEED_PASSWORD || resolved.status = ArchiveStatus.WRONG_PASSWORD)
+                        && (resolved.status = ArchiveStatus.NEED_PASSWORD
+                            || resolved.status = ArchiveStatus.WRONG_PASSWORD
+                            || resolved.passwordRetryEligible)
                         && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
                         && A_Index = 1) {
                         resolved := shown
                         continue  ; consume shared recovery budget; iteration 2 recomputes flags + pipeline
-                    } else {
-                        return
                     }
+                    return shown
                 }
 
                 this.error := false
@@ -451,6 +453,18 @@ class SmartZip
                         mayHandleSource := false
                         nestedMayRecycle := false
                     } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
+                        if (probe.encryptionEvidence) {
+                            tr.encryptionEvidence := true
+                            tr.passwordRetryEligible := true
+                        }
+                        if (!isBatch && tr.passwordRetryEligible && A_Index = 1) {
+                            shown := this.ShowDiagnostic(tr, isBatch, true)
+                            if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
+                                resolved := shown
+                                continue
+                            }
+                            return shown
+                        }
                         ; Still extract so FinalizeExtraction can isolate salvageable partial output.
                         this.error := true
                         mayHandleSource := false
@@ -462,13 +476,15 @@ class SmartZip
                         ; Budget available only on first shared-pipeline attempt
                         shown := this.ShowDiagnostic(tr, isBatch, A_Index = 1)
                         if (!isBatch
-                            && (tr.status = ArchiveStatus.NEED_PASSWORD || tr.status = ArchiveStatus.WRONG_PASSWORD)
+                            && (tr.status = ArchiveStatus.NEED_PASSWORD
+                                || tr.status = ArchiveStatus.WRONG_PASSWORD
+                                || tr.passwordRetryEligible)
                             && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
                             && A_Index = 1) {
                             resolved := shown
                             continue  ; resume shared pipeline once with new password
                         }
-                        return
+                        return shown
                     }
                 }
 
@@ -477,6 +493,11 @@ class SmartZip
                     this.RecycleItem(tmpDir, A_LineNumber, true)
 
                 extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
+
+                if (extractResult.status = ArchiveStatus.DATA_CORRUPT && probe.encryptionEvidence) {
+                    extractResult.encryptionEvidence := true
+                    extractResult.passwordRetryEligible := true
+                }
 
                 ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
                 mayDel := false
@@ -497,7 +518,9 @@ class SmartZip
                     this.RecycleItem(path, A_LineNumber, false)
 
                 if (!isBatch
-                    && (extractResult.status = ArchiveStatus.NEED_PASSWORD || extractResult.status = ArchiveStatus.WRONG_PASSWORD)
+                    && (extractResult.status = ArchiveStatus.NEED_PASSWORD
+                        || extractResult.status = ArchiveStatus.WRONG_PASSWORD
+                        || extractResult.passwordRetryEligible)
                     && A_Index = 1) {
                     shown := this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
                     if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
@@ -510,8 +533,11 @@ class SmartZip
 
                 ; Iteration 2 password failures: informative only (no discarded-success retry)
                 this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
-                break
+                return extractResult
             }
+
+            fallback := ArchiveResult(ArchiveStatus.UNKNOWN_ERROR, "extract", -1, path)
+            return fallback
         }
 
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here

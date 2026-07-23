@@ -1372,13 +1372,14 @@ Describe 'DiagnosticUISafety' {
         # Single shared extract call site in zipx (no duplicated extract path)
         $extractCalls = [regex]::Matches($u, 'ExtractArchiveToTemp\s*\(')
         $extractCalls.Count | Should Be 1
-        # Exactly three successful recovery assignments; each must consume Loop budget via nearby continue
+        # Exactly four successful recovery assignments (including encrypted DATA_CORRUPT);
+        # each must consume the shared Loop budget via nearby continue.
         # (preflight fall-through at A_Index=1 would leave budget open for a second recovery)
         $assignCount = [regex]::Matches($u, 'resolved\s*:=\s*shown').Count
-        $assignCount | Should Be 3
+        $assignCount | Should Be 4
         $assignThenContinue = [regex]::Matches($u,
             '(?s)resolved\s*:=\s*shown(?:[^\n]*\r?\n\s*(?:;[^\r\n]*)?)*?\r?\n\s*continue\b')
-        $assignThenContinue.Count | Should Be 3
+        $assignThenContinue.Count | Should Be 4
         # Preflight recovery must not fall through on iteration 1 (budget already spent)
         $preflightFallThrough = Test-Regex -Text $u -Pattern `
             '(?s)resolved\s*:=\s*shown\s*\r?\n\s*;[^\r\n]*fall through'
@@ -1578,5 +1579,43 @@ Describe 'VolumeSelectionSafety' {
     It 'partSkip INI key remains for compatibility' {
         $script:SmartZipSource | Should Match 'partSkip'
         $script:SmartZipSource | Should Match 'this\.partSkip\s*:='
+    }
+}
+
+Describe 'Kirs4ZipxOutcomeContract' {
+    It 'zipx returns ArchiveResult on success and failure paths' {
+        $u = $script:UnzipBody
+        $ok = Test-Regex -Text $u -Pattern '(?s)zipx\s*\([^)]*\)\s*\{.*?return\s+\w+'
+        $ok | Should Be $true
+
+        $returns = [regex]::Matches($u,
+            '(?m)^\s+return\s+(skipResult|missing|resolved|shown|extractResult|result|fallback)\b')
+        ($returns.Count -ge 3) | Should Be $true
+    }
+
+    It 'outer Unzip promotes only when outputState is usable' {
+        $u = $script:UnzipBody
+        $ok = Test-Regex -Text $u -Pattern 'outputState\s*=\s*["'']usable["'']|outputState\s*!=\s*["'']usable["'']'
+        $ok | Should Be $true
+
+        $legacyOnly = Test-Regex -Text $u -Pattern '(?s)zipx\([^)]*\)\s*\r?\n\s*if\s*!\s*DirExist\(tmpDir\)'
+        $legacyOnly | Should Be $false
+    }
+
+    It 'quarantine_failed cannot reach destination naming or MoveItem' {
+        $u = $script:UnzipBody
+        $gate = [regex]::Match($u,
+            '(?s)zipResult\s*:=\s*zipx\(i\).*?if\s*\(\s*zipResult\.outputState\s*!=\s*["'']usable["'']\s*\)\s*\r?\n\s*continue')
+        $gate.Success | Should Be $true
+
+        $promotionPath = [regex]::Match($u,
+            '(?s)zipResult\s*:=\s*zipx\(i\).*?outputState\s*!=\s*["'']usable["''].*?continue.*?this\.MoveItem\(')
+        $promotionPath.Success | Should Be $true
+    }
+
+    It 'FinalizeExtraction remains the only post-extract outputState assigner' {
+        $u = $script:UnzipBody
+        $ok = Test-Regex -Text $u -Pattern '(?s)ExtractArchiveToTemp\(.+?FinalizeExtraction\('
+        $ok | Should Be $true
     }
 }
