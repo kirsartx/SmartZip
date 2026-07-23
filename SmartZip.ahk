@@ -1765,7 +1765,8 @@ class SmartZip
         return result
     }
 
-    DiagnosticButtonAction(label, recovery, archivePath, volumeFirst, partialPath, g) {
+    ; Trailing * sinks Gui Click event args (GuiCtrl, Info). ObjBindMethod pre-binds all fixed args.
+    DiagnosticButtonAction(label, recovery, archivePath, volumeFirst, partialPath, g, *) {
         if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
             if (label = "关闭")
                 try g.Destroy()

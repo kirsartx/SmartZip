@@ -22,7 +22,8 @@ $script:CaseKeys = @(
     'recovery_retry_success_sets_ok_and_closes',
     'recovery_retry_wrong_keeps_window',
     'recovery_retry_cancel_keeps_window',
-    'recovery_batch_password_never_opens_gui'
+    'recovery_batch_password_never_opens_gui',
+    'recovery_boundfunc_click_arity_retry_password'
 )
 
 $script:ReasonTable = [ordered]@{
@@ -632,6 +633,51 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
             . ',"leakedPasswordInCopy":' (leaked ? "true" : "false") '}'
     }
 
+    ; Real Click path: same ObjBindMethod bind as production OnEvent, then invoke BoundFunc
+    ; with AHK Gui Click arity (GuiCtrl, Info). Proves label stays 重新输入密码 and event args
+    ; do not cause too-many-parameters before the password recovery handler runs.
+    if (cmd = "recovery_boundfunc_click") {
+        status := JsonGet(jsonText, "status", "WRONG_PASSWORD")
+        arch := JsonUnescape(JsonGet(jsonText, "archivePath", "D:\\data\\folder\\pack.7z"))
+        mode := JsonGet(jsonText, "retryMode", "success")
+        host.passwordRetryMode := mode
+        host.passwordRetryValue := JsonGet(jsonText, "retryPassword", "GoodPass")
+        r := MakeResult(status, arch, jsonText)
+        returned := host.ShowDiagnostic(r, false)
+        if !host.HasOwnProp("lastRecovery") || host.lastRecovery = ""
+            return '{"key":"' caseKey '","error":"lastRecovery missing after ShowDiagnostic","returnStatus":"","passwordUsed":"","guiCalls":' host.guiCalls ',"retryCalls":0,"closed":false,"invokeError":"","labelUsed":""}'
+        closedFlag := false
+        dummyGui := { Destroy: (*) => (closedFlag := true) }
+        labelUsed := "重新输入密码"
+        bound := ObjBindMethod(host, "DiagnosticButtonAction"
+            , labelUsed, host.lastRecovery, arch, "", "", dummyGui)
+        invokeError := ""
+        try {
+            ; Gui.Control Click event callback receives (GuiCtrlObj, Info)
+            bound({}, 0)
+        } catch as e {
+            invokeError := e.Message
+        }
+        if (host.lastRecovery.resolved != "")
+            returned := host.lastRecovery.resolved
+        retStatus := ""
+        retPass := ""
+        try {
+            if (returned != "" && returned is Object) {
+                retStatus := returned.status
+                retPass := returned.HasOwnProp("passwordUsed") ? returned.passwordUsed : ""
+            }
+        } catch {
+        }
+        return '{"key":"' caseKey '","returnStatus":"' EscapeJson(retStatus) '"'
+            . ',"passwordUsed":"' EscapeJson(retPass) '"'
+            . ',"guiCalls":' host.guiCalls
+            . ',"retryCalls":' host.runCalls.Length
+            . ',"closed":' (closedFlag ? "true" : "false")
+            . ',"invokeError":"' EscapeJson(invokeError) '"'
+            . ',"labelUsed":"' EscapeJson(labelUsed) '"}'
+    }
+
     return '{"key":"' caseKey '","error":"unknown command","cmd":"' EscapeJson(cmd) '"}'
 }
 '@
@@ -938,5 +984,20 @@ Describe 'DiagnosticUI' {
             -Json '{"callSummary":true}' -StageDir $script:StageDir
         $j = $out | ConvertFrom-Json
         $j.guiCalls | Should Be 0
+    }
+    It 'recovery_boundfunc_click_arity_retry_password' {
+        # Same production bind shape; Click event adds (GuiCtrl, Info). Must not too-many-params;
+        # 重新输入密码 must reach ResolveArchivePassword, set OK, close — not fire as 关闭.
+        $out = Invoke-DiagnosticUICase -Command 'recovery_boundfunc_click' `
+            -CaseKey 'recovery_boundfunc_click_arity_retry_password' `
+            -Json '{"status":"WRONG_PASSWORD","retryMode":"success","retryPassword":"GoodPass"}' `
+            -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.invokeError | Should Be ''
+        $j.returnStatus | Should Be 'OK'
+        $j.passwordUsed | Should Be 'GoodPass'
+        $j.closed | Should Be $true
+        $j.labelUsed | Should Be '重新输入密码'
+        $j.retryCalls | Should BeGreaterThan 0
     }
 }

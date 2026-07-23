@@ -1248,6 +1248,17 @@ Describe 'DiagnosticUISafety' {
         $show | Should Match 'item\.label'
     }
 
+    It 'DiagnosticButtonAction accepts trailing Click event args via variadic sink' {
+        # ObjBindMethod fully binds fixed args; Gui Click still passes (GuiCtrl, Info).
+        # Method must sink event arity (trailing *) or Click throws too-many-parameters.
+        $body = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    DiagnosticButtonAction(" -EndMarker "`n    RunCmdCapture("
+        if ([string]::IsNullOrEmpty($body)) { throw 'DiagnosticButtonAction slice missing' }
+        $ok = Test-Regex -Text $body -Pattern `
+            'DiagnosticButtonAction\s*\(\s*label\s*,\s*recovery\s*,\s*archivePath\s*,\s*volumeFirst\s*,\s*partialPath\s*,\s*g\s*,\s*\*'
+        $ok | Should Be $true
+    }
+
     It 'DiagnosticButtonAction assigns recovery resolved on password success' {
         $src = $script:SmartZipSource
         $src | Should Match '重新输入密码'
