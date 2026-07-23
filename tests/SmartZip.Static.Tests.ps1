@@ -1225,11 +1225,11 @@ Describe 'DiagnosticUISafety' {
         $body = Get-SourceSlice -Source $script:SmartZipSource `
             -StartMarker "`n    CheckCMD(" -EndMarker "`n    Loging("
         if ([string]::IsNullOrEmpty($body)) { $body = $script:SmartZipSource }
-        $okArgs = Test-Regex -Text $body -Pattern `
-            'Loging\(\s*RedactDiagnostic\s*\(\s*cmdArgs\s*\)'
-        $okLine = Test-Regex -Text $body -Pattern `
-            'RedactDiagnostic\s*\(\s*line\s*\)'
-        ($okArgs -and $okLine) | Should Be $true
+        # Single scoped pattern: both redactions must appear inside the Loging(...) call
+        # (not merely elsewhere in CheckCMD, e.g. pre-existing testLog lines).
+        $ok = Test-Regex -Text $body -Pattern `
+            'Loging\(\s*RedactDiagnostic\s*\(\s*cmdArgs\s*\).*RedactDiagnostic\s*\(\s*line\s*\)'
+        $ok | Should Be $true
     }
 }
 
