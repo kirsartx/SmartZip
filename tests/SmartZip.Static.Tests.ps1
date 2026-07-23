@@ -1238,6 +1238,16 @@ Describe 'DiagnosticUISafety' {
         $show | Should Match 'WinWaitClose'
     }
 
+    It 'ShowDiagnostic binds each diagnostic button label per control' {
+        $show = $script:ShowDiagnosticBody
+        if ([string]::IsNullOrEmpty($show)) { $show = $script:SmartZipSource }
+        # Guard AHK loop free-variable capture: must bind label at registration, not share loop-local lbl.
+        $ok = Test-Regex -Text $show -Pattern `
+            'ObjBindMethod\s*\(\s*this\s*,\s*"DiagnosticButtonAction"'
+        $ok | Should Be $true
+        $show | Should Match 'item\.label'
+    }
+
     It 'DiagnosticButtonAction assigns recovery resolved on password success' {
         $src = $script:SmartZipSource
         $src | Should Match '重新输入密码'

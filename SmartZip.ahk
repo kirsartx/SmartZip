@@ -1750,9 +1750,11 @@ class SmartZip
         }
         archivePath := result.archivePath
         volumeFirst := result.HasOwnProp("volumeFirst") ? result.volumeFirst : ""
+        ; Bind label per control (AHK fat-arrow free vars share one outer local; loop lbl would all fire as last).
         for item in btnHosts {
-            lbl := item.label
-            item.ctrl.OnEvent("Click", (*) => this.DiagnosticButtonAction(lbl, recovery, archivePath, volumeFirst, partialPath, g))
+            item.ctrl.OnEvent("Click"
+                , ObjBindMethod(this, "DiagnosticButtonAction"
+                    , item.label, recovery, archivePath, volumeFirst, partialPath, g))
         }
         g.OnEvent("Close", (*) => g.Destroy())
         g.Show("AutoSize Center")
