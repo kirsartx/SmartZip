@@ -420,63 +420,96 @@ class SmartZip
             if this.logLevel
                 this.Loging("resolve status=" resolved.status " exit=" resolved.exitCode, A_LineNumber, 4)
 
-            ; Non-success preflight: never delete source; skip extract (Task 5 owns partial dirs)
-            if (resolved.status != ArchiveStatus.OK && resolved.status != ArchiveStatus.OK_WITH_WARNING) {
-                this.error := true
-                if (resolved.status = ArchiveStatus.CANCELLED)
-                    this.exitCode := 255
-                this.ShowDiagnostic(resolved, isBatch)
-                return
-            }
-
-            this.error := false
-
-            ; test=0 still forces a full integrity test before configured source handling
-            mayHandleSource := (!loopPath) && !volume.isVolume
-                && (this.delSource || (resolved.passwordUsed != "" && this.delWhenHasPass))
-            nestedMayRecycle := loopPath && !volume.isVolume
-                && (resolved.status = ArchiveStatus.OK)
-            forceTest := this.test || mayHandleSource || nestedMayRecycle
-            if (forceTest) {
-                tr := this.TestArchive(path, resolved.passwordUsed)
-                if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
-                    mayHandleSource := false
-                    nestedMayRecycle := false
-                } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
-                    ; Still extract so FinalizeExtraction can isolate salvageable partial output.
+            ; Password recovery may require one resume of the shared pipeline
+            Loop 2 {
+                if (resolved.status != ArchiveStatus.OK && resolved.status != ArchiveStatus.OK_WITH_WARNING) {
                     this.error := true
-                    mayHandleSource := false
-                    nestedMayRecycle := false
-                } else if (tr.status != ArchiveStatus.OK) {
-                    this.error := true
-                    if (tr.status = ArchiveStatus.CANCELLED)
+                    if (resolved.status = ArchiveStatus.CANCELLED)
                         this.exitCode := 255
-                    this.ShowDiagnostic(tr, isBatch)
+                    shown := this.ShowDiagnostic(resolved, isBatch)
+                    if (!isBatch
+                        && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
+                        && A_Index = 1) {
+                        resolved := shown
+                        ; fall through into shared pipeline below
+                    } else {
+                        return
+                    }
+                }
+
+                this.error := false
+
+                ; Recompute after any recovery; test=0 still forces full test before source handling
+                mayHandleSource := (!loopPath) && !volume.isVolume
+                    && (this.delSource || (resolved.passwordUsed != "" && this.delWhenHasPass))
+                nestedMayRecycle := loopPath && !volume.isVolume
+                    && (resolved.status = ArchiveStatus.OK)
+                forceTest := this.test || mayHandleSource || nestedMayRecycle
+                if (forceTest) {
+                    tr := this.TestArchive(path, resolved.passwordUsed)
+                    if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
+                        mayHandleSource := false
+                        nestedMayRecycle := false
+                    } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
+                        ; Still extract so FinalizeExtraction can isolate salvageable partial output.
+                        this.error := true
+                        mayHandleSource := false
+                        nestedMayRecycle := false
+                    } else if (tr.status != ArchiveStatus.OK) {
+                        this.error := true
+                        if (tr.status = ArchiveStatus.CANCELLED)
+                            this.exitCode := 255
+                        shown := this.ShowDiagnostic(tr, isBatch)
+                        if (!isBatch
+                            && (tr.status = ArchiveStatus.NEED_PASSWORD || tr.status = ArchiveStatus.WRONG_PASSWORD)
+                            && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
+                            && A_Index = 1) {
+                            resolved := shown
+                            continue  ; resume shared pipeline once with new password
+                        }
+                        return
+                    }
+                }
+
+                ; Defensive: never merge into leftover temp from a prior failed pass
+                if DirExist(tmpDir)
+                    this.RecycleItem(tmpDir, A_LineNumber, true)
+
+                extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
+
+                ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
+                mayDel := false
+                if (resolved.status = ArchiveStatus.OK
+                    && extractResult.status = ArchiveStatus.OK
+                    && extractResult.exitCode = 0
+                    && !volume.isVolume) {
+                    if (loopPath)
+                        mayDel := false  ; nested handled below
+                    else if mayHandleSource
+                        mayDel := true
+                }
+
+                extractResult := this.FinalizeExtraction(path, extractResult, tmpDir, A_WorkingDir, mayDel)
+
+                ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
+                if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
+                    this.RecycleItem(path, A_LineNumber, false)
+
+                if (!isBatch
+                    && (extractResult.status = ArchiveStatus.NEED_PASSWORD || extractResult.status = ArchiveStatus.WRONG_PASSWORD)
+                    && A_Index = 1) {
+                    shown := this.ShowDiagnostic(extractResult, isBatch)
+                    if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
+                        resolved := shown
+                        ; temp already finalized away (moved/deleted); resume once
+                        continue
+                    }
                     return
                 }
+
+                this.ShowDiagnostic(extractResult, isBatch)
+                break
             }
-
-            extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
-
-            ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
-            mayDel := false
-            if (resolved.status = ArchiveStatus.OK
-                && extractResult.status = ArchiveStatus.OK
-                && extractResult.exitCode = 0
-                && !volume.isVolume) {
-                if (loopPath)
-                    mayDel := false  ; nested handled below
-                else if mayHandleSource
-                    mayDel := true
-            }
-
-            extractResult := this.FinalizeExtraction(path, extractResult, tmpDir, A_WorkingDir, mayDel)
-
-            ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
-            if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
-                this.RecycleItem(path, A_LineNumber, false)
-
-            this.ShowDiagnostic(extractResult, isBatch)
         }
 
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here

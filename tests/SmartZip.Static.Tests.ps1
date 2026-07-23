@@ -1275,6 +1275,37 @@ Describe 'DiagnosticUISafety' {
         $body | Should Not Match 'FinalizeExtraction'
         $body | Should Not Match 'RecycleItem'
     }
+
+    It 'zipx captures ShowDiagnostic return for password recovery resume' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        $ok = Test-Regex -Text $u -Pattern `
+            '(?s)(shown|diagResult|recovered)\s*:=\s*this\.ShowDiagnostic\('
+        $ok | Should Be $true
+    }
+
+    It 'zipx resumes TestArchive or ExtractArchiveToTemp after successful diagnostic return' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        # After ShowDiagnostic assignment, success status must be able to reach ExtractArchiveToTemp
+        $ok = Test-Regex -Text $u -Pattern `
+            '(?s)ShowDiagnostic\(.+?(ExtractArchiveToTemp|TestArchive)\s*\('
+        $ok | Should Be $true
+        # Must not permanently return after every ShowDiagnostic without inspecting status
+        $deadEndOnly = Test-Regex -Text $u -Pattern `
+            '(?s)ShowDiagnostic\([^)]*\)\s*\r?\n\s*return\s*\r?\n\s*\}'
+        # Allow some returns, but require at least one status check on the returned object
+        $statusCheck = Test-Regex -Text $u -Pattern `
+            '(?s)(shown|diagResult|recovered)\.[Ss]tatus\s*=\s*ArchiveStatus\.(OK|OK_WITH_WARNING)'
+        $statusCheck | Should Be $true
+        # At most one recovery resume: shared pipeline wrapped in Loop 2 with A_Index gate
+        $loopCap = Test-Regex -Text $u -Pattern 'Loop\s+2\s*\{'
+        $onceGate = Test-Regex -Text $u -Pattern 'A_Index\s*=\s*1'
+        ($loopCap -and $onceGate) | Should Be $true
+        # Single shared extract call site in zipx (no duplicated extract path)
+        $extractCalls = [regex]::Matches($u, 'ExtractArchiveToTemp\s*\(')
+        $extractCalls.Count | Should Be 1
+    }
 }
 
 Describe 'Kirs2MetadataAndDocs' {
