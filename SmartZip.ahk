@@ -1971,7 +1971,7 @@ class SmartZip
                     this.error := 1
                 else
                     this.error := 0
-                this.Loging(cmdArgs "`n[" what '] ' line, lineNum, this.error ? 3 : 4)
+                this.Loging(RedactDiagnostic(cmdArgs) "`n[" what "] " RedactDiagnostic(line), lineNum, this.error ? 3 : 4)
             }
         }
     }

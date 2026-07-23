@@ -1220,6 +1220,17 @@ Describe 'DiagnosticUISafety' {
         $hasRedactLine = Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(\s*line\s*\)'
         $hasRedactLine | Should Be $true
     }
+
+    It 'LogAndReturn redacts cmdArgs and line before Loging' {
+        $body = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    CheckCMD(" -EndMarker "`n    Loging("
+        if ([string]::IsNullOrEmpty($body)) { $body = $script:SmartZipSource }
+        $okArgs = Test-Regex -Text $body -Pattern `
+            'Loging\(\s*RedactDiagnostic\s*\(\s*cmdArgs\s*\)'
+        $okLine = Test-Regex -Text $body -Pattern `
+            'RedactDiagnostic\s*\(\s*line\s*\)'
+        ($okArgs -and $okLine) | Should Be $true
+    }
 }
 
 Describe 'Kirs2MetadataAndDocs' {
