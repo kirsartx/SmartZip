@@ -285,10 +285,6 @@ class SmartZip
             this.currentSize := FileGetSize(i)
             hideBool := this.currentSize / 1024 / 1024 < this.hideRunSize
 
-            part := IsPart(i)
-            if this.partSkip && !part
-                continue
-
             if this.muilt && !this.guiShow && !hideBool
                 this.Gui()
 

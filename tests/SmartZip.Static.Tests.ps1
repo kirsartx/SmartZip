@@ -1320,3 +1320,43 @@ Describe 'Kirs2MetadataAndDocs' {
         $replaced | Should Be $false
     }
 }
+
+Describe 'VolumeSelectionSafety' {
+    BeforeAll {
+        $script:UnzipBody = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    Unzip(" -EndMarker "`n    CreateZip("
+        if ([string]::IsNullOrEmpty($script:UnzipBody)) {
+            $script:UnzipBody = Get-SourceSlice -Source $script:SmartZipSource `
+                -StartMarker "`n    Unzip(" -EndMarker "`n    OpenZip("
+        }
+    }
+
+    It 'Unzip does not early-continue on partSkip before zipx' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        # Forbidden: partSkip combined with IsPart result driving continue before zipx
+        $bad = Test-Regex -Text $u -Pattern `
+            '(?s)partSkip\s*&&\s*!part.{0,80}continue'
+        $bad | Should Be $false
+    }
+
+    It 'zipx always calls DetectVolumeGroup for selected paths' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        $u | Should Match 'DetectVolumeGroup\s*\('
+        $u | Should Match 'processedVolumeFirst'
+        $u | Should Match 'MISSING_VOLUME'
+    }
+
+    It 'volume members remain excluded from mayDeleteSource paths' {
+        $script:SmartZipSource | Should Match '!\s*volume\.isVolume'
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            '(?s)mayHandleSource\s*:=.{0,120}!\s*volume\.isVolume'
+        $ok | Should Be $true
+    }
+
+    It 'partSkip INI key remains for compatibility' {
+        $script:SmartZipSource | Should Match 'partSkip'
+        $script:SmartZipSource | Should Match 'this\.partSkip\s*:='
+    }
+}
