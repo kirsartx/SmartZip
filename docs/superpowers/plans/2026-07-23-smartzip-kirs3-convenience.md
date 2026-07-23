@@ -1873,5 +1873,3 @@ Arithmetic must be re-measured after implementation; Task 8 locks the measured g
 2. **Inline Execution** — execute tasks in-session with checkpoints (`superpowers:executing-plans`)
 
 Implementation must remain on `codex/kirs3-convenience` and must never rewrite `v3.6-kirs.2`.
-
-
