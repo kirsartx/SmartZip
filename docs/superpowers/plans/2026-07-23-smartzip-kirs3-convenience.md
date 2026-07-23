@@ -95,7 +95,7 @@ FormatBatchDiagnosticSummary(batchDiagnostic) => String
 | `tests/SmartZip.Static.Tests.ps1` | 150 |
 | `tests/ArchiveDiagnostics.Tests.ps1` | 140 |
 | `tests/RunCmdCapture.Tests.ps1` | 15 |
-| `tests/PasswordPreflight.Tests.ps1` | 70 |
+| `tests/PasswordPreflight.Tests.ps1` | 78 |
 | `tests/ExtractionLifecycle.Tests.ps1` | 26 |
 | `tests/NestingMigration.Tests.ps1` | 30 |
 | `tests/DiagnosticUI.Tests.ps1` | 36 |
@@ -754,7 +754,7 @@ if ($ui.FailedCount -ne 0 -or $ui.PassedCount -ne 41) { throw "ui $($ui.PassedCo
 $s = Invoke-Pester -Script .\tests\SmartZip.Static.Tests.ps1 -PassThru
 if ($s.FailedCount -ne 0 -or $s.PassedCount -ne 158) { throw "static $($s.PassedCount)/$($s.FailedCount)" }
 $p = Invoke-Pester -Script .\tests\PasswordPreflight.Tests.ps1 -PassThru
-if ($p.FailedCount -ne 0 -or $p.PassedCount -ne 70) { throw "password $($p.PassedCount)/$($p.FailedCount)" }
+if ($p.FailedCount -ne 0 -or $p.PassedCount -ne 78) { throw "password $($p.PassedCount)/$($p.FailedCount)" }
 ```
 
 - [ ] **Step 5: Commit**
@@ -964,7 +964,7 @@ if ($s.FailedCount -ne 0 -or $s.PassedCount -ne 160) { throw "static $($s.Passed
 $ui = Invoke-Pester -Script .\tests\DiagnosticUI.Tests.ps1 -PassThru
 if ($ui.FailedCount -ne 0 -or $ui.PassedCount -ne 41) { throw "ui $($ui.PassedCount)/$($ui.FailedCount)" }
 $p = Invoke-Pester -Script .\tests\PasswordPreflight.Tests.ps1 -PassThru
-if ($p.FailedCount -ne 0 -or $p.PassedCount -ne 70) { throw "password" }
+if ($p.FailedCount -ne 0 -or $p.PassedCount -ne 78) { throw "password" }
 $l = Invoke-Pester -Script .\tests\ExtractionLifecycle.Tests.ps1 -PassThru
 if ($l.FailedCount -ne 0 -or $l.PassedCount -ne 26) { throw "lifecycle" }
 ```
@@ -1257,7 +1257,7 @@ if ($i.FailedCount -ne 0 -or $i.PassedCount -ne 32) { throw "integration $($i.Pa
 foreach ($pair in @(
     @{ f='ArchiveDiagnostics.Tests.ps1'; n=161 },
     @{ f='RunCmdCapture.Tests.ps1'; n=15 },
-    @{ f='PasswordPreflight.Tests.ps1'; n=70 },
+    @{ f='PasswordPreflight.Tests.ps1'; n=78 },
     @{ f='ExtractionLifecycle.Tests.ps1'; n=26 },
     @{ f='NestingMigration.Tests.ps1'; n=30 },
     @{ f='DiagnosticUI.Tests.ps1'; n=44 }
@@ -1397,7 +1397,7 @@ $expected = [ordered]@{
   'SmartZip.Static.Tests.ps1'=172
   'ArchiveDiagnostics.Tests.ps1'=161
   'RunCmdCapture.Tests.ps1'=15
-  'PasswordPreflight.Tests.ps1'=70
+  'PasswordPreflight.Tests.ps1'=78
   'ExtractionLifecycle.Tests.ps1'=26
   'NestingMigration.Tests.ps1'=30
   'DiagnosticUI.Tests.ps1'=44
@@ -1415,7 +1415,7 @@ $expected = [ordered]@{
   'SmartZip.Static.Tests.ps1'=172
   'ArchiveDiagnostics.Tests.ps1'=161
   'RunCmdCapture.Tests.ps1'=15
-  'PasswordPreflight.Tests.ps1'=70
+  'PasswordPreflight.Tests.ps1'=78
   'ExtractionLifecycle.Tests.ps1'=26
   'NestingMigration.Tests.ps1'=30
   'DiagnosticUI.Tests.ps1'=44
@@ -1478,7 +1478,7 @@ $oldRelease2Json = $oldRelease2 | ConvertTo-Json -Depth 8 -Compress
 
 $suites = [ordered]@{
   'SmartZip.Static.Tests.ps1'=172; 'ArchiveDiagnostics.Tests.ps1'=161
-  'RunCmdCapture.Tests.ps1'=15; 'PasswordPreflight.Tests.ps1'=70
+  'RunCmdCapture.Tests.ps1'=15; 'PasswordPreflight.Tests.ps1'=78
   'ExtractionLifecycle.Tests.ps1'=26; 'NestingMigration.Tests.ps1'=30
   'DiagnosticUI.Tests.ps1'=44; 'Real7Zip.Integration.Tests.ps1'=32
 }
@@ -1837,7 +1837,7 @@ This review checks the plan itself; it does not claim that future implementation
 | Static | 150 | 172 |
 | Diagnostics | 140 | 161 |
 | RunCmdCapture | 15 | 15 |
-| PasswordPreflight | 70 | 70 |
+| PasswordPreflight | 78 | 78 |
 | ExtractionLifecycle | 26 | 26 |
 | NestingMigration | 30 | 30 |
 | DiagnosticUI | 36 | 44 |
@@ -1873,7 +1873,5 @@ Arithmetic must be re-measured after implementation; Task 8 locks the measured g
 2. **Inline Execution** — execute tasks in-session with checkpoints (`superpowers:executing-plans`)
 
 Implementation must remain on `codex/kirs3-convenience` and must never rewrite `v3.6-kirs.2`.
-
-
 
 
