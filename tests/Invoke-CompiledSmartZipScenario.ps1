@@ -3,7 +3,7 @@
 .SYNOPSIS
   Run one isolated compiled-SmartZip scenario under a TEMP root.
 .NOTES
-  Every artifact stays under -Root (SmartZip-Kirs2-* TEMP). Never touches C:\Tool\SmartZip.
+  Every artifact stays under -Root (SmartZip-Kirs3-* TEMP). Never touches C:\Tool\SmartZip.
   Passwords are process-env / disposable INI only — never args, console, or report fields.
 #>
 [CmdletBinding()]

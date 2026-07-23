@@ -434,7 +434,28 @@ Describe 'ArchiveDiagnosticsVolumes' {
         'orphan_r00_not_first',
         'orphan_r00_derives_rar_first',
         'orphan_r00_missing_base_rar',
-        'orphan_r00_does_not_fabricate_r99'
+        'orphan_r00_does_not_fabricate_r99',
+        'report_2024_alone_not_volume',
+        'report_2024_alone_empty_first',
+        'report_2024_alone_empty_members',
+        'report_2024_alone_empty_missing',
+        'report_2024_alone_not_first',
+        'report_2024_unrelated_not_volume',
+        'photo_1234_alone_not_volume',
+        'bare_002_alone_not_volume',
+        'bare_002_alone_no_missing_list',
+        'bare_002_with_001_is_volume',
+        'bare_002_with_001_not_first',
+        'bare_002_with_001_first_path',
+        'bare_001_alone_still_volume',
+        'bare_001_alone_is_first',
+        'zip_001_alone_is_volume',
+        'tar_001_alone_is_volume',
+        'wim_001_alone_is_volume',
+        'sevenz_002_alone_is_volume',
+        'sevenz_002_alone_not_first',
+        'sevenz_002_alone_derives_first',
+        'sevenz_002_alone_missing_001'
     )
 
     # Keep the canonical 67 volume Its while folding follow-up coverage into them.

@@ -253,17 +253,17 @@ Describe 'VersionBanner' {
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
     }
 
-    It 'edition is Kirs.2' {
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.2"'
+    It 'edition is Kirs.3' {
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.3"'
     }
 
-    It 'buildVersion is 22' {
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*22\b'
+    It 'buildVersion is 23' {
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*23\b'
     }
 
-    It 'buileTime matches the Kirs.1 build timestamp' {
+    It 'buileTime matches the Kirs.3 build timestamp' {
         $script:SmartZipSource |
-            Should Match 'buileTime\s*:=\s*"2026/7/20 12:56:47"'
+            Should Match 'buileTime\s*:=\s*"2026/7/23 20:43:46"'
     }
 
     It 'Ahk2Exe file version remains 3.6' {
@@ -271,15 +271,15 @@ Describe 'VersionBanner' {
             Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
     }
 
-    It 'Ahk2Exe product version is 22' {
+    It 'Ahk2Exe product version is 23' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+22\b'
+            Should Match ';@Ahk2Exe-SetProductVersion\s+23\b'
     }
 }
 
 Describe 'AboutSection' {
 
-    It 'shows SmartZip 3.6 Kirs.2 build 22' {
+    It 'shows SmartZip 3.6 Kirs.3 build 23' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
@@ -675,6 +675,30 @@ Describe 'PasswordPreflightSafety' {
         ($inc -ge 0 -and $cls -gt $inc) | Should Be $true
     }
 
+    It 'production SmartZip.ahk includes ArchiveDiagnostics library' {
+        $script:SmartZipSource | Should Match '(?m)^#Include\s+lib\\ArchiveDiagnostics\.ahk\s*$'
+    }
+
+    It 'production SmartZip.ahk does not include IntegrationTestHook' {
+        $script:SmartZipSource | Should Not Match 'IntegrationTestHook'
+        $script:SmartZipSource | Should Not Match '(?i)#Include\s+\*?i?\s*tests\\'
+    }
+
+    It 'production source keeps IsSet test hook guards without defining callbacks' {
+        $script:SmartZipSource | Should Match 'IsSet\(\s*SmartZipTest_OnResult\s*\)'
+        $script:SmartZipSource | Should Match 'IsSet\(\s*SmartZipTest_SuppressGui\s*\)'
+        $script:SmartZipSource | Should Match 'IsSet\(\s*SmartZipTest_PasswordDialog\s*\)'
+        $script:SmartZipSource | Should Not Match '(?m)^SmartZipTest_OnResult\s*\('
+        $script:SmartZipSource | Should Not Match '(?m)^SmartZipTest_PasswordDialog\s*\('
+    }
+
+    It 'production does not define SmartZipTest_SuppressGui' {
+        # Defense-in-depth: production may call IsSet(SmartZipTest_SuppressGui) but must not define it.
+        $script:SmartZipSource | Should Not Match '(?m)^SmartZipTest_SuppressGui\s*(\(|:=)'
+        $script:SmartZipSource | Should Not Match '(?m)^global\s+SmartZipTest_SuppressGui\b'
+        $script:SmartZipSource | Should Not Match '(?m)^SmartZipTest_SuppressGui\s*\('
+    }
+
     It 'ProbeArchive method exists before TestArchive' {
         [string]::IsNullOrEmpty($script:ProbeArchiveBody) | Should Be $false
         $script:ProbeArchiveBody | Should Match 'ProbeArchive\s*\('
@@ -1062,7 +1086,9 @@ Describe 'DiagnosticUISafety' {
     }
 
     It 'ShowDiagnostic and WriteDiagnostic public signatures unchanged' {
-        $script:SmartZipSource | Should Match '(?m)^    ShowDiagnostic\(result,\s*isBatch\s*:=\s*false\)'
+        # Optional allowPasswordRetry defaults true so existing callers stay unchanged.
+        $script:SmartZipSource | Should Match '(?m)^    ShowDiagnostic\(result,\s*isBatch\s*:=\s*false,\s*allowPasswordRetry\s*:=\s*true\)'
+        $script:SmartZipSource | Should Match '(?m)^    DiagnosticButtons\(result(?:,\s*allowPasswordRetry\s*:=\s*true)?\)'
         $script:SmartZipSource | Should Match '(?m)^    WriteDiagnostic\(result\)'
         $script:SmartZipSource | Should Not Match '(?m)^    ShowDiagnostic\([^)]*isBatch\s*:=\s*true'
         $script:SmartZipSource | Should Not Match '(?m)^    WriteDiagnostic\(result\s*,'
@@ -1129,6 +1155,26 @@ Describe 'DiagnosticUISafety' {
         $okSum | Should Be $true
         $defs = [regex]::Matches($script:SmartZipSource, '(?m)^    ShowBatchDiagnosticSummary\s*\(')
         $defs.Count | Should Be 1
+    }
+
+    It 'ShowBatchDiagnosticSummary limits failed basenames to three with ellipsis' {
+        $src = $script:SmartZipSource
+        $src | Should Match 'FormatBatchDiagnosticSummary'
+        $fmtDefs = [regex]::Matches($src, '(?m)^    FormatBatchDiagnosticSummary\s*\(')
+        $fmtDefs.Count | Should Be 1
+        # Formatter caps at three basenames and uses overflow ellipsis; privacy fallback is not a full path.
+        $okCap = Test-Regex -Text $src -Pattern `
+            '(?s)FormatBatchDiagnosticSummary.{0,1200}(失败文件:).{0,400}(\.\.\. \(\+|SplitPath)'
+        $okCap | Should Be $true
+        $okEllipsis = Test-Regex -Text $src -Pattern `
+            '(?s)FormatBatchDiagnosticSummary.{0,1200}\.\.\. \(\+'
+        $okEllipsis | Should Be $true
+        $okSafe = Test-Regex -Text $src -Pattern `
+            '(?s)FormatBatchDiagnosticSummary.{0,1200}未知文件'
+        $okSafe | Should Be $true
+        $okCaller = Test-Regex -Text $src -Pattern `
+            '(?s)ShowBatchDiagnosticSummary\s*\(\)\s*\{.{0,600}FormatBatchDiagnosticSummary\s*\('
+        $okCaller | Should Be $true
     }
 
     It 'batch buckets are success warning failure skipped' {
@@ -1220,9 +1266,137 @@ Describe 'DiagnosticUISafety' {
         $hasRedactLine = Test-Regex -Text $combined -Pattern 'RedactDiagnostic\s*\(\s*line\s*\)'
         $hasRedactLine | Should Be $true
     }
+
+    It 'LogAndReturn redacts cmdArgs and line before Loging' {
+        $body = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    CheckCMD(" -EndMarker "`n    Loging("
+        if ([string]::IsNullOrEmpty($body)) { $body = $script:SmartZipSource }
+        # Single scoped pattern: both redactions must appear inside the Loging(...) call
+        # (not merely elsewhere in CheckCMD, e.g. pre-existing testLog lines).
+        $ok = Test-Regex -Text $body -Pattern `
+            'Loging\(\s*RedactDiagnostic\s*\(\s*cmdArgs\s*\).*RedactDiagnostic\s*\(\s*line\s*\)'
+        $ok | Should Be $true
+    }
+
+    It 'ShowDiagnostic waits with WinWaitClose on interactive GUI path' {
+        $show = $script:ShowDiagnosticBody
+        if ([string]::IsNullOrEmpty($show)) { $show = $script:SmartZipSource }
+        $show | Should Match 'WinWaitClose'
+    }
+
+    It 'ShowDiagnostic binds each diagnostic button label per control' {
+        $show = $script:ShowDiagnosticBody
+        if ([string]::IsNullOrEmpty($show)) { $show = $script:SmartZipSource }
+        # Guard AHK loop free-variable capture: must bind label at registration, not share loop-local lbl.
+        $ok = Test-Regex -Text $show -Pattern `
+            'ObjBindMethod\s*\(\s*this\s*,\s*"DiagnosticButtonAction"'
+        $ok | Should Be $true
+        $show | Should Match 'item\.label'
+    }
+
+    It 'DiagnosticButtonAction accepts trailing Click event args via variadic sink' {
+        # ObjBindMethod fully binds fixed args; Gui Click still passes (GuiCtrl, Info).
+        # Method must sink event arity (trailing *) or Click throws too-many-parameters.
+        $body = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    DiagnosticButtonAction(" -EndMarker "`n    RunCmdCapture("
+        if ([string]::IsNullOrEmpty($body)) { throw 'DiagnosticButtonAction slice missing' }
+        $ok = Test-Regex -Text $body -Pattern `
+            'DiagnosticButtonAction\s*\(\s*label\s*,\s*recovery\s*,\s*archivePath\s*,\s*volumeFirst\s*,\s*partialPath\s*,\s*g\s*,\s*\*'
+        $ok | Should Be $true
+    }
+
+    It 'DiagnosticButtonAction assigns recovery resolved on password success' {
+        $src = $script:SmartZipSource
+        $src | Should Match '重新输入密码'
+        $ok = Test-Regex -Text $src -Pattern `
+            '(?s)重新输入密码.{0,400}ResolveArchivePassword.{0,400}(resolved|recovery)'
+        $ok | Should Be $true
+    }
+
+    It 'DiagnosticButtonAction never extracts or recycles sources' {
+        $body = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    DiagnosticButtonAction(" -EndMarker "`n    RunCmdCapture("
+        if ([string]::IsNullOrEmpty($body)) { throw 'DiagnosticButtonAction slice missing' }
+        $body | Should Not Match 'ExtractArchiveToTemp'
+        $body | Should Not Match 'FinalizeExtraction'
+        $body | Should Not Match 'RecycleItem'
+    }
+
+    It 'zipx captures ShowDiagnostic return for password recovery resume' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        $ok = Test-Regex -Text $u -Pattern `
+            '(?s)(shown|diagResult|recovered)\s*:=\s*this\.ShowDiagnostic\('
+        $ok | Should Be $true
+    }
+
+    It 'zipx resumes TestArchive or ExtractArchiveToTemp after successful diagnostic return' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        # After ShowDiagnostic assignment, success status must be able to reach ExtractArchiveToTemp
+        $ok = Test-Regex -Text $u -Pattern `
+            '(?s)ShowDiagnostic\(.+?(ExtractArchiveToTemp|TestArchive)\s*\('
+        $ok | Should Be $true
+        # Captured diagnostic result must not return immediately without status inspection
+        # (bare this.ShowDiagnostic(...); return volume early-outs are fine; capture+return is not)
+        $deadEndOnly = Test-Regex -Text $u -Pattern `
+            '(?s)(shown|diagResult|recovered)\s*:=\s*this\.ShowDiagnostic\([^)]*\)\s*\r?\n\s*return\b'
+        $deadEndOnly | Should Be $false
+        # Allow some returns, but require at least one status check on the returned object
+        $statusCheck = Test-Regex -Text $u -Pattern `
+            '(?s)(shown|diagResult|recovered)\.[Ss]tatus\s*=\s*ArchiveStatus\.(OK|OK_WITH_WARNING)'
+        $statusCheck | Should Be $true
+        # At most one recovery resume: shared pipeline wrapped in Loop 2 with A_Index gate
+        $loopCap = Test-Regex -Text $u -Pattern 'Loop\s+2\s*\{'
+        $onceGate = Test-Regex -Text $u -Pattern 'A_Index\s*=\s*1'
+        ($loopCap -and $onceGate) | Should Be $true
+        # Single shared extract call site in zipx (no duplicated extract path)
+        $extractCalls = [regex]::Matches($u, 'ExtractArchiveToTemp\s*\(')
+        $extractCalls.Count | Should Be 1
+        # Exactly three successful recovery assignments; each must consume Loop budget via nearby continue
+        # (preflight fall-through at A_Index=1 would leave budget open for a second recovery)
+        $assignCount = [regex]::Matches($u, 'resolved\s*:=\s*shown').Count
+        $assignCount | Should Be 3
+        $assignThenContinue = [regex]::Matches($u,
+            '(?s)resolved\s*:=\s*shown(?:[^\n]*\r?\n\s*(?:;[^\r\n]*)?)*?\r?\n\s*continue\b')
+        $assignThenContinue.Count | Should Be 3
+        # Preflight recovery must not fall through on iteration 1 (budget already spent)
+        $preflightFallThrough = Test-Regex -Text $u -Pattern `
+            '(?s)resolved\s*:=\s*shown\s*\r?\n\s*;[^\r\n]*fall through'
+        $preflightFallThrough | Should Be $false
+    }
+
+    It 'zipx post-budget password diagnostics disable retry button' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        $src = $script:SmartZipSource
+        # Product gate: DiagnosticButtons only offers 重新输入密码 when allowPasswordRetry is true
+        $btn = $script:DiagnosticButtonsBody
+        if ([string]::IsNullOrEmpty($btn)) { $btn = $src }
+        $btn | Should Match '(?m)^    DiagnosticButtons\(result,\s*allowPasswordRetry\s*:=\s*true\)'
+        $btnGate = Test-Regex -Text $btn -Pattern `
+            '(?s)if\s*\(\s*allowPasswordRetry\b.{0,240}重新输入密码'
+        $btnGate | Should Be $true
+        # Test-failure diagnostic site passes budget availability (A_Index = 1)
+        $testSite = Test-Regex -Text $u -Pattern `
+            'ShowDiagnostic\(\s*tr\s*,\s*isBatch\s*,\s*A_Index\s*=\s*1\s*\)'
+        $testSite | Should Be $true
+        # Final extract diagnostic (and any extractResult ShowDiagnostic after password path)
+        # must pass A_Index = 1 so iteration-2 failures stay informative-only
+        $extractSites = [regex]::Matches($u,
+            'ShowDiagnostic\(\s*extractResult\s*,\s*isBatch\s*,\s*A_Index\s*=\s*1\s*\)')
+        ($extractSites.Count -ge 1) | Should Be $true
+        # No bare extract/test password ShowDiagnostic that always allows retry
+        $bareTest = Test-Regex -Text $u -Pattern `
+            'ShowDiagnostic\(\s*tr\s*,\s*isBatch\s*\)\s*'
+        $bareTest | Should Be $false
+        $bareExtract = Test-Regex -Text $u -Pattern `
+            'ShowDiagnostic\(\s*extractResult\s*,\s*isBatch\s*\)\s*'
+        $bareExtract | Should Be $false
+    }
 }
 
-Describe 'Kirs2MetadataAndDocs' {
+Describe 'Kirs3MetadataAndDocs' {
 
     BeforeAll {
         $script:ReadmePath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\README.md'))
@@ -1235,54 +1409,54 @@ Describe 'Kirs2MetadataAndDocs' {
         } else { '' }
     }
 
-    It 'Kirs2 file version remains 3.6' {
+    It 'Kirs3 file version remains 3.6' {
         $script:SmartZipSource |
             Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
     }
 
-    It 'Kirs2 product version is 22' {
+    It 'Kirs3 product version is 23' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+22\b'
+            Should Match ';@Ahk2Exe-SetProductVersion\s+23\b'
     }
 
-    It 'Kirs2 buildVersion is 22' {
+    It 'Kirs3 buildVersion is 23' {
         $script:SmartZipSource |
-            Should Match 'buildVersion\s*:=\s*22\b'
+            Should Match 'buildVersion\s*:=\s*23\b'
     }
 
-    It 'Kirs2 edition is Kirs.2' {
+    It 'Kirs3 edition is Kirs.3' {
         $script:SmartZipSource |
-            Should Match 'edition\s*:=\s*"Kirs\.2"'
+            Should Match 'edition\s*:=\s*"Kirs\.3"'
     }
 
-    It 'Kirs2 About keeps version edition build expression' {
+    It 'Kirs3 About keeps version edition build expression' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
     }
 
-    It 'Kirs2 rendered About identity is exact' {
+    It 'Kirs3 rendered About identity is exact' {
         # Identity is the product of MainVersion + edition + buildVersion constants.
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.2"'
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*22\b'
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.3"'
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*23\b'
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
-        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.2 (22)).
-        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.2\s+\(22\)') -or
+        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.3 (23)).
+        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.3\s+\(23\)') -or
             ($script:SmartZipSource -match 'MainVersion\s*:=\s*"3\.6"' -and
-             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.2"' -and
-             $script:SmartZipSource -match 'buildVersion\s*:=\s*22\b') | Should Be $true
+             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.3"' -and
+             $script:SmartZipSource -match 'buildVersion\s*:=\s*23\b') | Should Be $true
     }
 
-    It 'Kirs2 About keeps removed rows absent' {
+    It 'Kirs3 About keeps removed rows absent' {
         $script:SmartZipSource | Should Not Match '支持作者'
         $script:SmartZipSource | Should Not Match '建议反馈'
         $script:SmartZipSource | Should Not Match '论坛反馈'
     }
 
-    It 'Kirs2 README names safety pipeline' {
+    It 'Kirs3 README preserves Kirs.2 safety pipeline history' {
         $script:ReadmeText | Should Match 'Kirs\.2'
         $script:ReadmeText | Should Match 'list|探测|list →|list→'
         $ok = Test-Regex -Text $script:ReadmeText -Pattern `
@@ -1290,21 +1464,21 @@ Describe 'Kirs2MetadataAndDocs' {
         $ok | Should Be $true
     }
 
-    It 'Kirs2 README documents volume preservation' {
+    It 'Kirs3 README documents volume preservation' {
         $ok = Test-Regex -Text $script:ReadmeText -Pattern `
             '(?s)(首卷|第一卷|first.?volume).{0,200}(不.?自动删除|never|保留|preserve|normalization|规范化)'
         $ok | Should Be $true
         $script:ReadmeText | Should Match '分卷|volume'
     }
 
-    It 'Kirs2 ini docs deprecate successPercent' {
+    It 'Kirs3 ini docs deprecate successPercent' {
         $script:IniDocText | Should Match 'successPercent'
         $ok = Test-Regex -Text $script:IniDocText -Pattern `
             '(?s)successPercent.{0,200}(兼容保留|已弃用|deprecated|运行时不读取|不再通过大小百分比)'
         $ok | Should Be $true
     }
 
-    It 'Kirs2 docs explain recovery and redaction' {
+    It 'Kirs3 docs explain recovery and redaction' {
         $combined = $script:ReadmeText + "`n" + $script:IniDocText
         $okPartial = Test-Regex -Text $combined -Pattern '解压不完整|partial'
         $okRedact = Test-Regex -Text $combined -Pattern '脱敏|redact|密码.?不|password.?redact'
@@ -1312,11 +1486,78 @@ Describe 'Kirs2MetadataAndDocs' {
         ($okPartial -and $okRedact -and $okDiag) | Should Be $true
     }
 
-    It 'Kirs2 docs name engine without replacing Kirs1' {
+    It 'Kirs3 docs name engine without replacing Kirs1' {
         $combined = $script:ReadmeText + "`n" + $script:IniDocText
         $combined | Should Match 'C:\\Tool\\7-Zip-Zstandard\\7z\.exe|7-Zip-Zstandard'
         $replaced = Test-Regex -Text $combined -Pattern `
             '(?i)(Kirs\.1\s*(已被?替换|is\s+replaced|was\s+replaced)|replaces?\s+Kirs\.1|替代\s*Kirs\.1)'
         $replaced | Should Be $false
+    }
+
+    It 'Kirs3 README documents convenience recovery and volume selection' {
+        $script:ReadmeText | Should Match 'Kirs\.3'
+        $okRetry = Test-Regex -Text $script:ReadmeText -Pattern '重新输入密码|password.?retry|密码重试'
+        $okVol = Test-Regex -Text $script:ReadmeText -Pattern '(?s)(任一卷|非首卷|any member).{0,120}(首卷|first)'
+        $okNum = Test-Regex -Text $script:ReadmeText -Pattern 'report\.2024|普通数字|numeric'
+        ($okRetry -and $okVol -and $okNum) | Should Be $true
+    }
+
+    It 'Kirs3 ini partSkip documents same-group once semantics' {
+        $script:IniDocText | Should Match 'partSkip'
+        $ok = Test-Regex -Text $script:IniDocText -Pattern `
+            '(?s)partSkip.{0,200}(同组|一次|首卷|any member|from the first)'
+        $ok | Should Be $true
+        $script:IniDocText | Should Match '同组|首卷|一次'
+    }
+
+    It 'Kirs3 docs do not claim replacing Kirs.2 history' {
+        $combined = $script:ReadmeText + "`n" + $script:IniDocText
+        $replaced = Test-Regex -Text $combined -Pattern `
+            '(?i)(Kirs\.2\s*(已被?替换|is\s+replaced)|replaces?\s+Kirs\.2|替代\s*Kirs\.2)'
+        $replaced | Should Be $false
+    }
+
+    It 'Kirs3 production source has no IntegrationTestHook include' {
+        $script:SmartZipSource | Should Not Match 'IntegrationTestHook'
+    }
+}
+
+Describe 'VolumeSelectionSafety' {
+    BeforeAll {
+        $script:UnzipBody = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    Unzip(" -EndMarker "`n    CreateZip("
+        if ([string]::IsNullOrEmpty($script:UnzipBody)) {
+            $script:UnzipBody = Get-SourceSlice -Source $script:SmartZipSource `
+                -StartMarker "`n    Unzip(" -EndMarker "`n    OpenZip("
+        }
+    }
+
+    It 'Unzip does not early-continue on partSkip before zipx' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        # Forbidden: partSkip combined with IsPart result driving continue before zipx
+        $bad = Test-Regex -Text $u -Pattern `
+            '(?s)partSkip\s*&&\s*!part.{0,80}continue'
+        $bad | Should Be $false
+    }
+
+    It 'zipx always calls DetectVolumeGroup for selected paths' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        $u | Should Match 'DetectVolumeGroup\s*\('
+        $u | Should Match 'processedVolumeFirst'
+        $u | Should Match 'MISSING_VOLUME'
+    }
+
+    It 'volume members remain excluded from mayDeleteSource paths' {
+        $script:SmartZipSource | Should Match '!\s*volume\.isVolume'
+        $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
+            '(?s)mayHandleSource\s*:=.{0,120}!\s*volume\.isVolume'
+        $ok | Should Be $true
+    }
+
+    It 'partSkip INI key remains for compatibility' {
+        $script:SmartZipSource | Should Match 'partSkip'
+        $script:SmartZipSource | Should Match 'this\.partSkip\s*:='
     }
 }

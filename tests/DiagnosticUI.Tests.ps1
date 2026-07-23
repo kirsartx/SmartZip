@@ -11,13 +11,23 @@ $script:CaseKeys = @(
     'reason_HEADER_CORRUPT', 'reason_TRUNCATED', 'reason_DATA_CORRUPT', 'reason_CANCELLED',
     'reason_IO_ERROR', 'reason_UNKNOWN_ERROR',
     'title_warning', 'title_failure',
-    'button_partial', 'button_retry_password', 'button_locate_first', 'button_open_7zip',
+    'button_partial', 'button_retry_password', 'button_retry_password_disabled',
+    'button_locate_first', 'button_open_7zip',
     'button_copy_redacted', 'button_close',
     'batch_success', 'batch_warning', 'batch_failure', 'batch_skipped_one_summary',
+    'batch_summary_failed_basenames_max_three',
+    'batch_summary_failed_basenames_ellipsis',
+    'batch_summary_no_password_material',
     'silence_ok_and_cancelled', 'log_warning',
     'rotate_at_1mib', 'rotate_shift_1_to_2', 'rotate_max_three',
     'redact_dash_p', 'copy_basename_only', 'copy_omits_full_path', 'log_allows_full_path',
-    'no_password_or_clipboard_leak', 'partial_utf8_diagnostic'
+    'no_password_or_clipboard_leak', 'partial_utf8_diagnostic',
+    'recovery_returns_original_without_retry',
+    'recovery_retry_success_sets_ok_and_closes',
+    'recovery_retry_wrong_keeps_window',
+    'recovery_retry_cancel_keeps_window',
+    'recovery_batch_password_never_opens_gui',
+    'recovery_boundfunc_click_arity_retry_password'
 )
 
 $script:ReasonTable = [ordered]@{
@@ -183,6 +193,10 @@ class DiagnosticUIHost {
     fileDeletes := []
     workRoot := ""
     scriptDirOverride := ""
+    passwordRetryMode := "echo"
+    passwordRetryValue := ""
+    lastRecovery := ""
+    diagAutoClose := true
 
     ScriptDir() {
         if (this.scriptDirOverride != "")
@@ -201,6 +215,9 @@ class DiagnosticUIHost {
         this.fileMoves := []
         this.fileDeletes := []
         this.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
+        this.lastRecovery := ""
+        this.passwordRetryMode := "echo"
+        this.passwordRetryValue := ""
     }
 
     DiagnosticOpenPath(path) {
@@ -237,6 +254,19 @@ class DiagnosticUIHost {
 
     ResolveArchivePassword(path, probeResult := "") {
         this.runCalls.Push({ kind: "retry_password", path: path })
+        mode := this.HasOwnProp("passwordRetryMode") ? this.passwordRetryMode : "echo"
+        if (mode = "success") {
+            r := ArchiveResult(ArchiveStatus.OK, "password", 0, path, "")
+            r.passwordUsed := this.HasOwnProp("passwordRetryValue") ? this.passwordRetryValue : "GoodPass"
+            return r
+        }
+        if (mode = "wrong") {
+            r := ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "password", 2, path, "")
+            return r
+        }
+        if (mode = "cancel") {
+            return ArchiveResult(ArchiveStatus.CANCELLED, "password", 255, path, "")
+        }
         return probeResult
     }
 
@@ -357,9 +387,11 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
         if (partial != "" && JsonGetBool(jsonText, "partialExists", true)) {
             try DirCreate(partial)
         }
+        ; Default true preserves Task 4 callers; false omits password retry (exhausted recovery budget).
+        allowPasswordRetry := JsonGetBool(jsonText, "allowPasswordRetry", true)
         title := host.DiagnosticTitle(r)
-        buttons := host.DiagnosticButtons(r)
-        host.ShowDiagnostic(r, false)
+        buttons := host.DiagnosticButtons(r, allowPasswordRetry)
+        host.ShowDiagnostic(r, false, allowPasswordRetry)
         showGui := host.guiCalls > 0
         bn := ""
         if (r.archivePath != "")
@@ -385,6 +417,9 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
                 r.batchBucket := s.bucket
             host.ShowDiagnostic(r, true)
         }
+        summaryText := ""
+        if host.HasMethod("FormatBatchDiagnosticSummary")
+            summaryText := host.FormatBatchDiagnosticSummary(host.batchDiagnostic)
         if JsonGetBool(jsonText, "callSummary", true)
             host.ShowBatchDiagnosticSummary()
         return '{"key":"' caseKey '"'
@@ -392,7 +427,39 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
             . ',"warning":' ArrayNamesJson(host.batchDiagnostic.warning)
             . ',"failure":' ArrayNamesJson(host.batchDiagnostic.failure)
             . ',"skipped":' ArrayNamesJson(host.batchDiagnostic.skipped) '}'
+            . ',"summaryText":"' EscapeJson(summaryText) '"'
             . ',"summaryCalls":' host.summaryCalls ',"guiCalls":' host.guiCalls '}'
+    }
+
+    if (cmd = "batch_failures") {
+        ; N DATA_CORRUPT failures with given archive paths; expose FormatBatchDiagnosticSummary text.
+        host.muilt := true
+        host.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
+        paths := []
+        if RegExMatch(jsonText, '"paths"\s*:\s*\[([^\]]*)\]', &pm) {
+            pos := 1
+            hay := pm[1]
+            while RegExMatch(hay, '"((?:\\.|[^"\\])*)"', &m, pos) {
+                paths.Push(JsonUnescape(m[1]))
+                pos := m.Pos + m.Len
+            }
+        }
+        pw := JsonGet(jsonText, "passwordUsed", "")
+        for p in paths {
+            r := MakeResult(ArchiveStatus.DATA_CORRUPT, p)
+            if (pw != "")
+                r.passwordUsed := JsonUnescape(pw)
+            host.ShowDiagnostic(r, true)
+        }
+        if !host.HasMethod("FormatBatchDiagnosticSummary")
+            return '{"key":"' caseKey '","error":"FormatBatchDiagnosticSummary missing","summaryText":"","summaryCalls":' host.summaryCalls ',"guiCalls":' host.guiCalls '}'
+        summaryText := host.FormatBatchDiagnosticSummary(host.batchDiagnostic)
+        if JsonGetBool(jsonText, "callSummary", true)
+            host.ShowBatchDiagnosticSummary()
+        return '{"key":"' caseKey '"'
+            . ',"summaryText":"' EscapeJson(summaryText) '"'
+            . ',"summaryCalls":' host.summaryCalls ',"guiCalls":' host.guiCalls
+            . ',"failureCount":' host.batchDiagnostic.failure.Length '}'
     }
 
     if (cmd = "log" || cmd = "silence") {
@@ -568,6 +635,90 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
             . ',"content":"' EscapeJson(content) '","returned":"' EscapeJson(text) '"}'
     }
 
+    if (cmd = "recovery") {
+        status := JsonGet(jsonText, "status", "WRONG_PASSWORD")
+        arch := JsonUnescape(JsonGet(jsonText, "archivePath", "D:\\data\\folder\\pack.7z"))
+        mode := JsonGet(jsonText, "retryMode", "echo")
+        host.passwordRetryMode := mode
+        host.passwordRetryValue := JsonGet(jsonText, "retryPassword", "GoodPass")
+        r := MakeResult(status, arch, jsonText)
+        ; Headless path: product ShowDiagnostic builds recovery on lastRecovery (no WinWaitClose).
+        returned := host.ShowDiagnostic(r, false)
+        closed := false
+        if (JsonGetBool(jsonText, "clickRetry", false)) {
+            if !host.HasOwnProp("lastRecovery") || host.lastRecovery = ""
+                return '{"key":"' caseKey '","error":"lastRecovery missing after ShowDiagnostic","returnStatus":"","passwordUsed":"","guiCalls":' host.guiCalls ',"retryCalls":0,"closed":false,"leakedPasswordInCopy":false}'
+            closedFlag := false
+            dummyGui := { Destroy: (*) => (closedFlag := true) }
+            host.DiagnosticButtonAction("重新输入密码", host.lastRecovery, arch, "", "", dummyGui)
+            if (host.lastRecovery.resolved != "")
+                returned := host.lastRecovery.resolved
+            closed := closedFlag
+        }
+        retStatus := ""
+        retPass := ""
+        try {
+            if (returned != "" && returned is Object) {
+                retStatus := returned.status
+                retPass := returned.HasOwnProp("passwordUsed") ? returned.passwordUsed : ""
+            }
+        } catch {
+        }
+        copyText := host.FormatDiagnosticCopy(r)
+        leaked := (retPass != "" && InStr(copyText, retPass) > 0)
+        return '{"key":"' caseKey '","returnStatus":"' EscapeJson(retStatus) '"'
+            . ',"passwordUsed":"' EscapeJson(retPass) '"'
+            . ',"guiCalls":' host.guiCalls
+            . ',"retryCalls":' host.runCalls.Length
+            . ',"closed":' (closed ? "true" : "false")
+            . ',"leakedPasswordInCopy":' (leaked ? "true" : "false") '}'
+    }
+
+    ; Real Click path: same ObjBindMethod bind as production OnEvent, then invoke BoundFunc
+    ; with AHK Gui Click arity (GuiCtrl, Info). Proves label stays 重新输入密码 and event args
+    ; do not cause too-many-parameters before the password recovery handler runs.
+    if (cmd = "recovery_boundfunc_click") {
+        status := JsonGet(jsonText, "status", "WRONG_PASSWORD")
+        arch := JsonUnescape(JsonGet(jsonText, "archivePath", "D:\\data\\folder\\pack.7z"))
+        mode := JsonGet(jsonText, "retryMode", "success")
+        host.passwordRetryMode := mode
+        host.passwordRetryValue := JsonGet(jsonText, "retryPassword", "GoodPass")
+        r := MakeResult(status, arch, jsonText)
+        returned := host.ShowDiagnostic(r, false)
+        if !host.HasOwnProp("lastRecovery") || host.lastRecovery = ""
+            return '{"key":"' caseKey '","error":"lastRecovery missing after ShowDiagnostic","returnStatus":"","passwordUsed":"","guiCalls":' host.guiCalls ',"retryCalls":0,"closed":false,"invokeError":"","labelUsed":""}'
+        closedFlag := false
+        dummyGui := { Destroy: (*) => (closedFlag := true) }
+        labelUsed := "重新输入密码"
+        bound := ObjBindMethod(host, "DiagnosticButtonAction"
+            , labelUsed, host.lastRecovery, arch, "", "", dummyGui)
+        invokeError := ""
+        try {
+            ; Gui.Control Click event callback receives (GuiCtrlObj, Info)
+            bound({}, 0)
+        } catch as e {
+            invokeError := e.Message
+        }
+        if (host.lastRecovery.resolved != "")
+            returned := host.lastRecovery.resolved
+        retStatus := ""
+        retPass := ""
+        try {
+            if (returned != "" && returned is Object) {
+                retStatus := returned.status
+                retPass := returned.HasOwnProp("passwordUsed") ? returned.passwordUsed : ""
+            }
+        } catch {
+        }
+        return '{"key":"' caseKey '","returnStatus":"' EscapeJson(retStatus) '"'
+            . ',"passwordUsed":"' EscapeJson(retPass) '"'
+            . ',"guiCalls":' host.guiCalls
+            . ',"retryCalls":' host.runCalls.Length
+            . ',"closed":' (closedFlag ? "true" : "false")
+            . ',"invokeError":"' EscapeJson(invokeError) '"'
+            . ',"labelUsed":"' EscapeJson(labelUsed) '"}'
+    }
+
     return '{"key":"' caseKey '","error":"unknown command","cmd":"' EscapeJson(cmd) '"}'
 }
 '@
@@ -687,6 +838,19 @@ Describe 'DiagnosticUI' {
         (Get-JsonField $out 'showGui') | Should Be 'true'
     }
 
+    It 'button_retry_password_disabled' {
+        # When recovery budget is exhausted, password-class diagnostics stay informative
+        # but must not offer 重新输入密码 (success would be discarded by zipx).
+        $out = Invoke-DiagnosticUICase -Command 'buttons' -CaseKey 'button_retry_password_disabled' `
+            -Json '{"status":"WRONG_PASSWORD","archivePath":"D:\\data\\secret.7z","partialOutputDir":"","partialExists":false,"allowPasswordRetry":false}' `
+            -StageDir $script:StageDir
+        (Test-JsonHasButton $out '重新输入密码') | Should Be $false
+        (Test-JsonHasButton $out '使用 7-Zip 打开') | Should Be $true
+        (Test-JsonHasButton $out '复制脱敏诊断信息') | Should Be $true
+        (Test-JsonHasButton $out '关闭') | Should Be $true
+        (Get-JsonField $out 'showGui') | Should Be 'true'
+    }
+
     It 'button_locate_first' {
         $out = Invoke-DiagnosticUICase -Command 'buttons' -CaseKey 'button_locate_first' `
             -Json '{"status":"MISSING_VOLUME","archivePath":"D:\\data\\v.part01.rar","volumeFirst":"D:\\data\\v.part01.rar"}' `
@@ -739,6 +903,62 @@ Describe 'DiagnosticUI' {
             -Json '{"callSummary":true}' -StageDir $script:StageDir
         ($out -match '"skipped":\[[^\]]*"d\.zip"') | Should Be $true
         ($out -match 'e\.part02\.rar') | Should Be $true
+        (Get-JsonField $out 'summaryCalls') | Should Be '1'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
+    }
+
+    It 'batch_summary_failed_basenames_max_three' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' -CaseKey 'batch_summary_failed_basenames_max_three' `
+            -Json '{"paths":["D:\\x\\a.7z","D:\\x\\b.7z","D:\\x\\c.7z"]}' -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        ($null -ne $summary -and $summary.Length -gt 0) | Should Be $true
+        # Preserve existing count lines
+        ($summary -match '成功:\s*0') | Should Be $true
+        ($summary -match '警告:\s*0') | Should Be $true
+        ($summary -match '失败:\s*3') | Should Be $true
+        ($summary -match '跳过:\s*0') | Should Be $true
+        ($summary -match '失败文件:') | Should Be $true
+        # Exactly the three basenames; no drive/directory prefix leak
+        ($summary -match 'a\.7z') | Should Be $true
+        ($summary -match 'b\.7z') | Should Be $true
+        ($summary -match 'c\.7z') | Should Be $true
+        ($summary -match 'D:\\') | Should Be $false
+        ($summary -match 'D:') | Should Be $false
+        ($summary -match '\\x\\') | Should Be $false
+        ($summary -match '\.\.\.') | Should Be $false
+        (Get-JsonField $out 'summaryCalls') | Should Be '1'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
+    }
+
+    It 'batch_summary_failed_basenames_ellipsis' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' -CaseKey 'batch_summary_failed_basenames_ellipsis' `
+            -Json '{"paths":["D:\\x\\a.7z","D:\\x\\b.7z","D:\\x\\c.7z","D:\\x\\d.7z"]}' -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        ($null -ne $summary -and $summary.Length -gt 0) | Should Be $true
+        ($summary -match '失败:\s*4') | Should Be $true
+        ($summary -match 'a\.7z') | Should Be $true
+        ($summary -match 'b\.7z') | Should Be $true
+        ($summary -match 'c\.7z') | Should Be $true
+        # Fourth basename omitted; exact overflow count
+        ($summary -match 'd\.7z') | Should Be $false
+        ($summary -match '\.\.\. \(\+1\)') | Should Be $true
+        ($summary -match 'D:\\') | Should Be $false
+        ($summary -match 'D:') | Should Be $false
+        ($summary -match '\\x\\') | Should Be $false
+        (Get-JsonField $out 'summaryCalls') | Should Be '1'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
+    }
+
+    It 'batch_summary_no_password_material' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' -CaseKey 'batch_summary_no_password_material' `
+            -Json '{"paths":["D:\\secret\\vault.7z"],"passwordUsed":"S3cret!"}' -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        ($null -ne $summary -and $summary.Length -gt 0) | Should Be $true
+        ($summary -match 'vault\.7z') | Should Be $true
+        ($summary -match 'S3cret') | Should Be $false
+        ($summary -match 'passwordUsed') | Should Be $false
+        ($summary -match 'D:\\') | Should Be $false
+        ($summary -match 'secret') | Should Be $false
         (Get-JsonField $out 'summaryCalls') | Should Be '1'
         (Get-JsonField $out 'guiCalls') | Should Be '0'
     }
@@ -837,5 +1057,57 @@ Describe 'DiagnosticUI' {
         $content = Get-JsonField $out 'content'
         ($content -match 'DATA_CORRUPT') | Should Be $true
         ($content -match 'status=') | Should Be $true
+    }
+
+    It 'recovery_returns_original_without_retry' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_returns_original_without_retry' `
+            -Json '{"status":"WRONG_PASSWORD","clickRetry":false}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'WRONG_PASSWORD'
+    }
+    It 'recovery_retry_success_sets_ok_and_closes' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_retry_success_sets_ok_and_closes' `
+            -Json '{"status":"WRONG_PASSWORD","clickRetry":true,"retryMode":"success","retryPassword":"GoodPass"}' `
+            -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'OK'
+        $j.passwordUsed | Should Be 'GoodPass'
+        $j.closed | Should Be $true
+        $j.leakedPasswordInCopy | Should Be $false
+    }
+    It 'recovery_retry_wrong_keeps_window' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_retry_wrong_keeps_window' `
+            -Json '{"status":"WRONG_PASSWORD","clickRetry":true,"retryMode":"wrong"}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'WRONG_PASSWORD'
+        $j.closed | Should Be $false
+    }
+    It 'recovery_retry_cancel_keeps_window' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_retry_cancel_keeps_window' `
+            -Json '{"status":"NEED_PASSWORD","clickRetry":true,"retryMode":"cancel"}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'NEED_PASSWORD'
+        $j.closed | Should Be $false
+    }
+    It 'recovery_batch_password_never_opens_gui' {
+        $out = Invoke-DiagnosticUICase -Command 'batch' -CaseKey 'recovery_batch_password_never_opens_gui' `
+            -Json '{"callSummary":true}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.guiCalls | Should Be 0
+    }
+    It 'recovery_boundfunc_click_arity_retry_password' {
+        # Same production bind shape; Click event adds (GuiCtrl, Info). Must not too-many-params;
+        # 重新输入密码 must reach ResolveArchivePassword, set OK, close — not fire as 关闭.
+        $out = Invoke-DiagnosticUICase -Command 'recovery_boundfunc_click' `
+            -CaseKey 'recovery_boundfunc_click_arity_retry_password' `
+            -Json '{"status":"WRONG_PASSWORD","retryMode":"success","retryPassword":"GoodPass"}' `
+            -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.invokeError | Should Be ''
+        $j.returnStatus | Should Be 'OK'
+        $j.passwordUsed | Should Be 'GoodPass'
+        $j.closed | Should Be $true
+        $j.labelUsed | Should Be '重新输入密码'
+        $j.retryCalls | Should BeGreaterThan 0
     }
 }

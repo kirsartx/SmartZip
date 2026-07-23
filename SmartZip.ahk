@@ -5,13 +5,13 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6
-;@Ahk2Exe-SetProductVersion 22
+;@Ahk2Exe-SetProductVersion 23
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 22
+buildVersion := 23
 MainVersion := "3.6"
-edition := "Kirs.2"
+edition := "Kirs.3"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/20 12:56:47"
+buileTime := "2026/7/23 20:43:46"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
@@ -31,7 +31,6 @@ else
     Setting
 
 #Include lib\ArchiveDiagnostics.ahk
-#Include *i tests\IntegrationTestHook.ahk
 class SmartZip
 {
     __New(sevenZipDir)
@@ -285,10 +284,6 @@ class SmartZip
             this.currentSize := FileGetSize(i)
             hideBool := this.currentSize / 1024 / 1024 < this.hideRunSize
 
-            part := IsPart(i)
-            if this.partSkip && !part
-                continue
-
             if this.muilt && !this.guiShow && !hideBool
                 this.Gui()
 
@@ -424,63 +419,99 @@ class SmartZip
             if this.logLevel
                 this.Loging("resolve status=" resolved.status " exit=" resolved.exitCode, A_LineNumber, 4)
 
-            ; Non-success preflight: never delete source; skip extract (Task 5 owns partial dirs)
-            if (resolved.status != ArchiveStatus.OK && resolved.status != ArchiveStatus.OK_WITH_WARNING) {
-                this.error := true
-                if (resolved.status = ArchiveStatus.CANCELLED)
-                    this.exitCode := 255
-                this.ShowDiagnostic(resolved, isBatch)
-                return
-            }
-
-            this.error := false
-
-            ; test=0 still forces a full integrity test before configured source handling
-            mayHandleSource := (!loopPath) && !volume.isVolume
-                && (this.delSource || (resolved.passwordUsed != "" && this.delWhenHasPass))
-            nestedMayRecycle := loopPath && !volume.isVolume
-                && (resolved.status = ArchiveStatus.OK)
-            forceTest := this.test || mayHandleSource || nestedMayRecycle
-            if (forceTest) {
-                tr := this.TestArchive(path, resolved.passwordUsed)
-                if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
-                    mayHandleSource := false
-                    nestedMayRecycle := false
-                } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
-                    ; Still extract so FinalizeExtraction can isolate salvageable partial output.
+            ; Password recovery may require one resume of the shared pipeline
+            Loop 2 {
+                if (resolved.status != ArchiveStatus.OK && resolved.status != ArchiveStatus.OK_WITH_WARNING) {
                     this.error := true
-                    mayHandleSource := false
-                    nestedMayRecycle := false
-                } else if (tr.status != ArchiveStatus.OK) {
-                    this.error := true
-                    if (tr.status = ArchiveStatus.CANCELLED)
+                    if (resolved.status = ArchiveStatus.CANCELLED)
                         this.exitCode := 255
-                    this.ShowDiagnostic(tr, isBatch)
+                    shown := this.ShowDiagnostic(resolved, isBatch)
+                    if (!isBatch
+                        && (resolved.status = ArchiveStatus.NEED_PASSWORD || resolved.status = ArchiveStatus.WRONG_PASSWORD)
+                        && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
+                        && A_Index = 1) {
+                        resolved := shown
+                        continue  ; consume shared recovery budget; iteration 2 recomputes flags + pipeline
+                    } else {
+                        return
+                    }
+                }
+
+                this.error := false
+
+                ; Recompute after any recovery; test=0 still forces full test before source handling
+                mayHandleSource := (!loopPath) && !volume.isVolume
+                    && (this.delSource || (resolved.passwordUsed != "" && this.delWhenHasPass))
+                nestedMayRecycle := loopPath && !volume.isVolume
+                    && (resolved.status = ArchiveStatus.OK)
+                forceTest := this.test || mayHandleSource || nestedMayRecycle
+                if (forceTest) {
+                    tr := this.TestArchive(path, resolved.passwordUsed)
+                    if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
+                        mayHandleSource := false
+                        nestedMayRecycle := false
+                    } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
+                        ; Still extract so FinalizeExtraction can isolate salvageable partial output.
+                        this.error := true
+                        mayHandleSource := false
+                        nestedMayRecycle := false
+                    } else if (tr.status != ArchiveStatus.OK) {
+                        this.error := true
+                        if (tr.status = ArchiveStatus.CANCELLED)
+                            this.exitCode := 255
+                        ; Budget available only on first shared-pipeline attempt
+                        shown := this.ShowDiagnostic(tr, isBatch, A_Index = 1)
+                        if (!isBatch
+                            && (tr.status = ArchiveStatus.NEED_PASSWORD || tr.status = ArchiveStatus.WRONG_PASSWORD)
+                            && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
+                            && A_Index = 1) {
+                            resolved := shown
+                            continue  ; resume shared pipeline once with new password
+                        }
+                        return
+                    }
+                }
+
+                ; Defensive: never merge into leftover temp from a prior failed pass
+                if DirExist(tmpDir)
+                    this.RecycleItem(tmpDir, A_LineNumber, true)
+
+                extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
+
+                ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
+                mayDel := false
+                if (resolved.status = ArchiveStatus.OK
+                    && extractResult.status = ArchiveStatus.OK
+                    && extractResult.exitCode = 0
+                    && !volume.isVolume) {
+                    if (loopPath)
+                        mayDel := false  ; nested handled below
+                    else if mayHandleSource
+                        mayDel := true
+                }
+
+                extractResult := this.FinalizeExtraction(path, extractResult, tmpDir, A_WorkingDir, mayDel)
+
+                ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
+                if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
+                    this.RecycleItem(path, A_LineNumber, false)
+
+                if (!isBatch
+                    && (extractResult.status = ArchiveStatus.NEED_PASSWORD || extractResult.status = ArchiveStatus.WRONG_PASSWORD)
+                    && A_Index = 1) {
+                    shown := this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
+                    if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
+                        resolved := shown
+                        ; temp already finalized away (moved/deleted); resume once
+                        continue
+                    }
                     return
                 }
+
+                ; Iteration 2 password failures: informative only (no discarded-success retry)
+                this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
+                break
             }
-
-            extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
-
-            ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
-            mayDel := false
-            if (resolved.status = ArchiveStatus.OK
-                && extractResult.status = ArchiveStatus.OK
-                && extractResult.exitCode = 0
-                && !volume.isVolume) {
-                if (loopPath)
-                    mayDel := false  ; nested handled below
-                else if mayHandleSource
-                    mayDel := true
-            }
-
-            extractResult := this.FinalizeExtraction(path, extractResult, tmpDir, A_WorkingDir, mayDel)
-
-            ; Nested source recycling: zipx exclusively owns this after nested clean OK and non-volume
-            if (nestedMayRecycle && extractResult.isCleanSuccess && !volume.isVolume && FileExist(path))
-                this.RecycleItem(path, A_LineNumber, false)
-
-            this.ShowDiagnostic(extractResult, isBatch)
         }
 
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
@@ -1567,13 +1598,14 @@ class SmartZip
         }
     }
 
-    DiagnosticButtons(result) {
+    DiagnosticButtons(result, allowPasswordRetry := true) {
         buttons := []
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
             return buttons
         if (result.partialOutputDir != "" && DirExist(result.partialOutputDir))
             buttons.Push("打开部分文件目录")
-        if (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD)
+        if (allowPasswordRetry
+            && (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD))
             buttons.Push("重新输入密码")
         if (result.status = ArchiveStatus.MISSING_VOLUME)
             buttons.Push("定位首卷")
@@ -1666,21 +1698,54 @@ class SmartZip
             this.WriteDiagnostic(result)
     }
 
+    FormatBatchDiagnosticSummary(b) {
+        sc := b.success.Length
+        wc := b.warning.Length
+        fc := b.failure.Length
+        kc := b.skipped.Length
+        msg := "批量解压完成`n成功: " sc "`n警告: " wc "`n失败: " fc "`n跳过: " kc
+        if (fc > 0) {
+            names := []
+            limit := fc < 3 ? fc : 3
+            i := 1
+            while (i <= limit) {
+                p := b.failure[i].archivePath
+                bn := ""
+                try SplitPath(p, &bn)
+                catch {
+                    bn := ""
+                }
+                if (bn = "")
+                    bn := "(未知文件)"
+                names.Push(bn)
+                i++
+            }
+            msg .= "`n失败文件: "
+            j := 1
+            while (j <= names.Length) {
+                if (j > 1)
+                    msg .= ", "
+                msg .= names[j]
+                j++
+            }
+            if (fc > 3)
+                msg .= " ... (+" (fc - 3) ")"
+        }
+        return msg
+    }
+
     ShowBatchDiagnosticSummary() {
         if this.HasOwnProp("summaryCalls")
             this.summaryCalls++
         if !this.HasOwnProp("batchDiagnostic")
             return
         b := this.batchDiagnostic
-        sc := b.success.Length
-        wc := b.warning.Length
-        fc := b.failure.Length
-        kc := b.skipped.Length
+        msg := this.FormatBatchDiagnosticSummary(b)
+        this.lastBatchSummaryText := msg
         if this.HasOwnProp("diagHeadless") && this.diagHeadless {
             this.guiCalls := this.HasOwnProp("guiCalls") ? this.guiCalls : 0
             return
         }
-        msg := "批量解压完成`n成功: " sc "`n警告: " wc "`n失败: " fc "`n跳过: " kc
         try TrayTip("SmartZip", msg)
         catch {
             MsgBox(msg, "SmartZip 批量摘要", "Iconi T5")
@@ -1707,30 +1772,36 @@ class SmartZip
         FileMove(logPath, logPath ".1", 1)
     }
 
-    ShowDiagnostic(result, isBatch := false) {
+    ShowDiagnostic(result, isBatch := false, allowPasswordRetry := true) {
         if IsSet(SmartZipTest_OnResult)
             SmartZipTest_OnResult(result)
         if isBatch {
             this.RecordBatchDiagnostic(result)
-            return
+            return result
         }
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
-            return
+            return result
         this.WriteDiagnostic(result)
         title := this.DiagnosticTitle(result)
         reason := this.DiagnosticReason(result)
         recommendation := this.DiagnosticRecommendation(result)
-        buttons := this.DiagnosticButtons(result)
+        buttons := this.DiagnosticButtons(result, allowPasswordRetry)
         archiveName := result.archivePath
         SplitPath(result.archivePath, &archiveName)
         partialPath := result.partialOutputDir
+        recovery := { original: result, resolved: "" }
 
-        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui
-            return
+        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
+            this.lastRecovery := recovery
+            return result
+        }
 
         if this.HasOwnProp("diagHeadless") && this.diagHeadless {
             this.DiagnosticShowGui(title, archiveName, reason, recommendation, partialPath, buttons)
-            return
+            this.lastRecovery := recovery
+            if (recovery.resolved != "")
+                return recovery.resolved
+            return result
         }
 
         g := Gui("+AlwaysOnTop +MinSize320x180", title)
@@ -1748,14 +1819,23 @@ class SmartZip
         }
         archivePath := result.archivePath
         volumeFirst := result.HasOwnProp("volumeFirst") ? result.volumeFirst : ""
+        ; Bind label per control (AHK fat-arrow free vars share one outer local; loop lbl would all fire as last).
         for item in btnHosts {
-            lbl := item.label
-            item.ctrl.OnEvent("Click", (*) => this.DiagnosticButtonAction(lbl, result, archivePath, volumeFirst, partialPath, g))
+            item.ctrl.OnEvent("Click"
+                , ObjBindMethod(this, "DiagnosticButtonAction"
+                    , item.label, recovery, archivePath, volumeFirst, partialPath, g))
         }
+        g.OnEvent("Close", (*) => g.Destroy())
         g.Show("AutoSize Center")
+        WinWaitClose(g.Hwnd)
+        this.lastRecovery := recovery
+        if (recovery.resolved != "")
+            return recovery.resolved
+        return result
     }
 
-    DiagnosticButtonAction(label, result, archivePath, volumeFirst, partialPath, g) {
+    ; Trailing * sinks Gui Click event args (GuiCtrl, Info). ObjBindMethod pre-binds all fixed args.
+    DiagnosticButtonAction(label, recovery, archivePath, volumeFirst, partialPath, g, *) {
         if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
             if (label = "关闭")
                 try g.Destroy()
@@ -1766,7 +1846,15 @@ class SmartZip
                 if (partialPath != "" && DirExist(partialPath))
                     Run('explorer.exe "' partialPath '"')
             case "重新输入密码":
-                try this.ResolveArchivePassword(archivePath, result)
+                try {
+                    r := this.ResolveArchivePassword(archivePath, recovery.original)
+                    if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
+                        recovery.resolved := r
+                        try g.Destroy()
+                    }
+                    ; wrong/cancel: keep diagnostic open; no source mutation
+                } catch {
+                }
             case "定位首卷":
                 target := volumeFirst != "" ? volumeFirst : archivePath
                 if (target != "" && FileExist(target))
@@ -1782,7 +1870,7 @@ class SmartZip
                 else
                     Run('"' this.7zG '" "' archivePath '"')
             case "复制脱敏诊断信息":
-                clip := this.FormatDiagnosticCopy(result)
+                clip := this.FormatDiagnosticCopy(recovery.original)
                 if this.HasOwnProp("DiagnosticSetClipboard")
                     this.DiagnosticSetClipboard(clip)
                 else
@@ -1975,7 +2063,7 @@ class SmartZip
                     this.error := 1
                 else
                     this.error := 0
-                this.Loging(cmdArgs "`n[" what '] ' line, lineNum, this.error ? 3 : 4)
+                this.Loging(RedactDiagnostic(cmdArgs) "`n[" what "] " RedactDiagnostic(line), lineNum, this.error ? 3 : 4)
             }
         }
     }
@@ -2086,7 +2174,7 @@ Setting()
 
     Tab.UseTab(3)
     lineGeneration()
-    GuiCheckBox("partSkip", ini.partSkip, "跳过分卷压缩包", "第一卷会被解压,其他的跳过`n分卷不会自动删除", "Section")
+    GuiCheckBox("partSkip", ini.partSkip, "分卷同组只解压一次", "任一卷从首卷开始；同组多选只解压一次`n分卷不会自动删除", "Section")
     GuiCheckBox("test", ini.test, "启用测试中的功能", "当前没有测试中功能")
     GuiCheckBox("cmdLog", ini.cmdLog, "启用测试日志", "检查文件时的测试日志,与下文的日志等级无关")
     lineGeneration("xs")

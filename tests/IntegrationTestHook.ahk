@@ -1,8 +1,15 @@
 ; Optional compile-time include for TEMP integration builds only.
-; Task 10 production staging excludes the tests/ directory, so #Include *i is absent.
+; Production staging excludes the tests/ directory, so this file is never present there.
 ; When this file is included, all three callbacks are defined (IsSet == true).
+;
+; SuppressGui must be a function (not a bare variable): class methods see global
+; functions via IsSet/call, but a free global variable is invisible inside methods,
+; so `IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui` would fail open
+; and leave the diagnostic GUI blocking WaitForExit.
 
-SmartZipTest_SuppressGui := true
+SmartZipTest_SuppressGui(*) {
+    return true
+}
 
 SmartZipTest_PasswordDialog(path) {
     mode := EnvGet("SMARTZIP_TEST_PASSWORD_MODE")
