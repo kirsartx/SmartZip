@@ -97,6 +97,28 @@ AssertEq(d4.tempAction, "partial", "exit2_with_output_goes_partial")
 AssertTrue(InStr(d4.partialName, "_解压不完整_") > 0, "exit2_partial_name_has_marker")
 AssertTrue(InStr(d4.diagnostic, "DATA_CORRUPT") > 0 || InStr(d4.diagnostic, "status=") > 0, "exit2_diagnostic_written_concept")
 
+ClassifyGuiExtractForOracle(extractExit, testOutput) {
+    if (extractExit = 255)
+        return ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255)
+    detail := Classify7zResult("extract", extractExit, testOutput)
+    if (extractExit != 1)
+        return detail
+    if (detail.status != ArchiveStatus.OK && detail.status != ArchiveStatus.OK_WITH_WARNING)
+        return detail
+    result := ArchiveResult(ArchiveStatus.UNKNOWN_ERROR, "extract", 1)
+    result.isCleanSuccess := false
+    result.mayDeleteSource := false
+    return result
+}
+
+oe1 := ClassifyGuiExtractForOracle(1, "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n")
+AssertTrue(oe1.status != ArchiveStatus.OK && oe1.status != ArchiveStatus.OK_WITH_WARNING, "gui_exit1_not_borrow_test_warning_success")
+AssertEq(oe1.isCleanSuccess, false, "gui_exit1_not_clean")
+oe0 := ClassifyGuiExtractForOracle(0, "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n")
+AssertEq(oe0.status, ArchiveStatus.OK_WITH_WARNING, "gui_exit0_test_warning_ok_with_warning")
+oe2 := ClassifyGuiExtractForOracle(2, "ERROR: CRC Failed`n")
+AssertEq(oe2.status, ArchiveStatus.DATA_CORRUPT, "gui_exit2_crc_still_data_corrupt")
+
 ; 5) Failure empty temp → remove empty only
 r5 := ArchiveResult(ArchiveStatus.HEADER_CORRUPT, "extract", 2, "D:\\a\\bad.zip")
 d5 := FinalizeDecision("D:\\a\\bad.zip", r5, "D:\\tmp\\empty", "D:\\out", true, false, false, false)

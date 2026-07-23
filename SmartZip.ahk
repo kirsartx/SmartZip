@@ -1418,14 +1418,42 @@ class SmartZip
         if (extractExit = 255) {
             result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, path)
         } else {
-            ; Always re-test with capture: 7-Zip ZS may return exit 0 with trailing-data
-            ; WARNINGS, and non-zero exits need full output for DATA_CORRUPT / etc.
+            ; Follow-up console test is a different process. Use its text for hard-error detail
+            ; and for exit-0 warning detection, but never promote GUI exit 1 to OK_WITH_WARNING
+            ; solely because the later test printed warning evidence.
             cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
             cap := this.RunCmdCapture(cmd, "UTF-8")
             if this.cmdLog
                 this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
-            result := Classify7zResult("extract", extractExit, cap.output, path)
-            result.exitCode := extractExit
+            if (extractExit = 1) {
+                ; No GUI extract stdout capture available: exit 1 remains failure.
+                ; Classify with empty extract text first so t-warning text cannot invent success.
+                result := Classify7zResult("extract", extractExit, "", path)
+                detail := Classify7zResult("extract", extractExit, cap.output, path)
+                if (detail.status != ArchiveStatus.OK && detail.status != ArchiveStatus.OK_WITH_WARNING) {
+                    result := detail
+                    result.exitCode := extractExit
+                } else {
+                    result.exitCode := extractExit
+                    if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+                        result.status := ArchiveStatus.UNKNOWN_ERROR
+                    result.isCleanSuccess := false
+                    result.mayDeleteSource := false
+                    result.passwordRetryEligible := false
+                }
+                ; Carry encryption / hard-error detail flags when detail is a real failure
+                if (detail.encryptionEvidence)
+                    result.encryptionEvidence := true
+                if (detail.status = ArchiveStatus.DATA_CORRUPT && result.encryptionEvidence)
+                    result.passwordRetryEligible := true
+                if (detail.errorLines.Length) {
+                    result.errorLines := detail.errorLines
+                    result.output := detail.output
+                }
+            } else {
+                result := Classify7zResult("extract", extractExit, cap.output, path)
+                result.exitCode := extractExit
+            }
         }
         result.tempOutputDir := tempDir
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)

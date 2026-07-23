@@ -848,6 +848,15 @@ Describe 'ExtractionLifecycleSafety' {
         $script:ExtractArchiveToTempBody | Should Match '255'
     }
 
+    It 'ExtractArchiveToTemp does not classify GUI exit 1 success from follow-up test warning text alone' {
+        $b = $script:ExtractArchiveToTempBody
+        # Must special-case extractExit = 1 (or non-zero without extract capture) before borrowing t output as warning success
+        $ok = Test-Regex -Text $b -Pattern '(?s)extractExit\s*=\s*1|exitCode\s*=\s*1'
+        $ok | Should Be $true
+        # Must still re-test via console capture for diagnostics on other paths
+        $b | Should Match ' t '
+    }
+
     It 'no IsSuccess size or successPercent authorization remains' {
         $script:UnzipBody | Should Not Match 'IsSuccess\s*\('
         $script:SmartZipSource | Should Not Match '(?s)IsSuccess\s*\(\s*\)\s*\{[^}]*succesSpercent'

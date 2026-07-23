@@ -288,6 +288,47 @@ AssertEq(d4.tempAction, "partial", "exit2_with_output_goes_partial")
 AssertTrue(InStr(d4.partialName, "_解压不完整_") > 0, "exit2_partial_name_has_marker")
 AssertTrue(InStr(d4.diagnostic, "DATA_CORRUPT") > 0 || InStr(d4.diagnostic, "status=") > 0, "exit2_diagnostic_written_concept")
 
+; Kirs.4: GUI extract exit 1 must not become OK_WITH_WARNING from a later 7z t warning-only capture
+host.Reset()
+host.scriptedExit := 1
+host.scriptedCap := { exitCode: 0, output: "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n", cancelled: false }
+e1path := host.workRoot "\a\warnish.7z"
+e1tmp := host.workRoot "\tmp\e1"
+try DirCreate(host.workRoot "\a")
+if !FileExist(e1path)
+    FileAppend("w", e1path, "UTF-8")
+try DirCreate(e1tmp)
+host.SeedFile(e1tmp "\partial.bin", "x")
+erE1 := host.ExtractArchiveToTemp(e1path, "", e1tmp)
+AssertTrue(erE1.status != ArchiveStatus.OK && erE1.status != ArchiveStatus.OK_WITH_WARNING, "gui_exit1_not_borrow_test_warning_success")
+AssertEq(erE1.isCleanSuccess, false, "gui_exit1_not_clean")
+
+; Exit 0 extract + t warning text may still be OK_WITH_WARNING
+host.Reset()
+host.scriptedExit := 0
+host.scriptedCap := { exitCode: 0, output: "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n", cancelled: false }
+e0path := host.workRoot "\a\trail.7z"
+e0tmp := host.workRoot "\tmp\e0"
+if !FileExist(e0path)
+    FileAppend("t", e0path, "UTF-8")
+try DirCreate(e0tmp)
+host.SeedFile(e0tmp "\ok.bin", "x")
+erE0 := host.ExtractArchiveToTemp(e0path, "", e0tmp)
+AssertEq(erE0.status, ArchiveStatus.OK_WITH_WARNING, "gui_exit0_test_warning_ok_with_warning")
+AssertEq(erE0.isCleanSuccess, false, "gui_exit0_warning_not_clean")
+
+; Exit 2 + t CRC still DATA_CORRUPT (existing path remains)
+host.Reset()
+host.scriptedExit := 2
+host.scriptedCap := { exitCode: 2, output: "ERROR: CRC Failed`n", cancelled: false }
+e2path := host.workRoot "\a\badcrc.7z"
+e2tmp := host.workRoot "\tmp\e2"
+if !FileExist(e2path)
+    FileAppend("b", e2path, "UTF-8")
+try DirCreate(e2tmp)
+erE2 := host.ExtractArchiveToTemp(e2path, "", e2tmp)
+AssertEq(erE2.status, ArchiveStatus.DATA_CORRUPT, "gui_exit2_crc_still_data_corrupt")
+
 r5 := ArchiveResult(ArchiveStatus.HEADER_CORRUPT, "extract", 2, host.workRoot "\a\bad.zip")
 emptyTmp := host.workRoot "\tmp\empty"
 d5 := RunFinalizeCase(host, host.workRoot "\a\bad.zip", r5, emptyTmp, o1, true, false, false, false)
@@ -445,6 +486,10 @@ Describe 'ExtractionLifecycleBehavior' {
         'exit2_with_output_goes_partial',
         'exit2_partial_name_has_marker',
         'exit2_diagnostic_written_concept',
+        'gui_exit1_not_borrow_test_warning_success',
+        'gui_exit1_not_clean',
+        'gui_exit0_test_warning_ok_with_warning',
+        'gui_exit2_crc_still_data_corrupt',
         'fail_empty_removes_temp_only',
         'fail_empty_preserves_source',
         'cancel_never_source_handle',
