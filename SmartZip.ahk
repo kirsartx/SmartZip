@@ -1401,6 +1401,28 @@ class SmartZip
 
     GetClipboardText() => this.HasOwnProp("clipText") ? this.clipText : A_Clipboard
 
+    TempDirHasPromotableOutput(tempDir) {
+        if !DirExist(tempDir)
+            return false
+        loop files tempDir "\*.*", "DF"
+            return true
+        return false
+    }
+
+    IsolatePartialOutput(tempDir, partialPath) {
+        movedPath := partialPath
+        try DirMove(tempDir, partialPath)
+        catch {
+            try movedPath := this.MoveItem(tempDir, partialPath, 1, A_LineNumber)
+            catch
+                return ""
+        }
+        if (StrLower(movedPath) = StrLower(tempDir))
+            return ""
+        return (DirExist(movedPath) && !this.TempDirHasPromotableOutput(tempDir))
+            ? movedPath : ""
+    }
+
     ExtractArchiveToTemp(path, password, tempDir) {
         pass := ""
         if (password != "")
@@ -1464,27 +1486,24 @@ class SmartZip
     }
 
     FinalizeExtraction(path, result, tempDir, targetDir, mayDeleteSource) {
-        ; Clean success requires both OK status and extract exit 0 (never size ratio).
         result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
         result.mayDeleteSource := result.isCleanSuccess && mayDeleteSource
+        ; Default remains construction "none" until this method assigns post-extract state
+        if !result.HasOwnProp("outputState") || result.outputState = ""
+            result.outputState := "none"
+        result.retainedOutputDir := ""
 
-        tempHasOutput := false
-        if DirExist(tempDir) {
-            loop files tempDir "\*.*", "DF" {
-                tempHasOutput := true
-                break
-            }
-        }
+        tempHasOutput := this.TempDirHasPromotableOutput(tempDir)
 
         if (result.status = ArchiveStatus.OK && result.exitCode = 0) {
-            ; keep tempDir for existing post-zipx MoveItem / AfterUnzip
+            result.outputState := "usable"
             if (mayDeleteSource && result.isCleanSuccess)
-                this.RecycleItem(path, A_LineNumber)  ; Recycle Bin only (delete=false)
+                this.RecycleItem(path, A_LineNumber)  ; Recycle Bin only
             return result
         }
 
         if (result.status = ArchiveStatus.OK_WITH_WARNING) {
-            ; usable output stays in tempDir for movers; never source-handle
+            result.outputState := "usable"
             return result
         }
 
@@ -1492,17 +1511,24 @@ class SmartZip
             SplitPath(path, , , , &nameNoExt)
             stamp := FormatTime(, "yyyyMMdd-HHmmss")
             partial := this.PathDupl(targetDir "\" nameNoExt "_解压不完整_" stamp, 1)
-            try DirMove(tempDir, partial)
-            catch {
-                try this.MoveItem(tempDir, partial, 1, A_LineNumber)
+            isolatedPath := this.IsolatePartialOutput(tempDir, partial)
+            if (isolatedPath != "") {
+                result.outputState := "quarantined"
+                result.partialOutputDir := isolatedPath
+                result.retainedOutputDir := ""
+                this.WriteDiagnostic(result)
+                return result
             }
-            result.partialOutputDir := partial
+            result.outputState := "quarantine_failed"
+            result.partialOutputDir := DirExist(partial) ? partial : ""
+            result.retainedOutputDir := tempDir
             this.WriteDiagnostic(result)
             return result
         }
 
         if DirExist(tempDir)
             this.RecycleItem(tempDir, A_LineNumber, true)
+        result.outputState := "none"
         return result
     }
 

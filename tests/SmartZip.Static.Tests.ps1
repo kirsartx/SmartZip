@@ -807,6 +807,8 @@ Describe 'PasswordPreflightSafety' {
     }
 }
 
+$script:PartialIsolationBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    TempDirHasPromotableOutput(" -EndMarker "`n    ExtractArchiveToTemp("
 $script:ExtractArchiveToTempBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    ExtractArchiveToTemp(" -EndMarker "`n    FinalizeExtraction("
 $script:FinalizeExtractionBody = Get-SourceSlice -Source $script:SmartZipSource `
@@ -864,11 +866,19 @@ Describe 'ExtractionLifecycleSafety' {
         $script:FinalizeExtractionBody | Should Not Match 'succesSpercent|successPercent|folderSize\s*/\s*this\.currentSize'
     }
 
-    It 'FinalizeExtraction encodes partial dir name 解压不完整 and diagnostic file' {
+    It 'FinalizeExtraction reports verified partial isolation and explicit output state' {
+        [string]::IsNullOrEmpty($script:PartialIsolationBody) | Should Be $false
+        $script:PartialIsolationBody | Should Match 'IsolatePartialOutput\s*\('
+        $script:PartialIsolationBody | Should Match 'TempDirHasPromotableOutput\s*\('
+        $script:PartialIsolationBody | Should Match 'DirExist\s*\(\s*movedPath\s*\)'
+        $script:PartialIsolationBody | Should Match 'MoveItem\s*\('
         $script:FinalizeExtractionBody | Should Match '解压不完整'
         $script:FinalizeExtractionBody | Should Match 'yyyyMMdd-HHmmss'
         $script:FinalizeExtractionBody | Should Match 'PathDupl\s*\('
-        $script:FinalizeExtractionBody | Should Match 'DirMove\s*\('
+        $script:FinalizeExtractionBody | Should Match 'IsolatePartialOutput\s*\('
+        $script:FinalizeExtractionBody | Should Match 'outputState\s*:=\s*"quarantined"'
+        $script:FinalizeExtractionBody | Should Match 'outputState\s*:=\s*"quarantine_failed"'
+        $script:FinalizeExtractionBody | Should Match 'retainedOutputDir\s*:=\s*tempDir'
         $ok = Test-Regex -Text $script:FinalizeExtractionBody -Pattern 'WriteDiagnostic\s*\('
         $ok | Should Be $true
         $script:WriteDiagnosticBody | Should Match 'SmartZip-诊断\.txt'
@@ -920,7 +930,7 @@ Describe 'ExtractionLifecycleSafety' {
 
     It 'partial diagnostic name and PathDupl used' {
         $script:FinalizeExtractionBody | Should Match 'PathDupl\s*\('
-        $script:FinalizeExtractionBody | Should Match 'DirMove|MoveItem'
+        $script:PartialIsolationBody | Should Match 'DirMove|MoveItem'
     }
 
     It 'successPercent assignment may still load but must not gate extract success' {
