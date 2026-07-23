@@ -1133,6 +1133,26 @@ Describe 'DiagnosticUISafety' {
         $defs.Count | Should Be 1
     }
 
+    It 'ShowBatchDiagnosticSummary limits failed basenames to three with ellipsis' {
+        $src = $script:SmartZipSource
+        $src | Should Match 'FormatBatchDiagnosticSummary'
+        $fmtDefs = [regex]::Matches($src, '(?m)^    FormatBatchDiagnosticSummary\s*\(')
+        $fmtDefs.Count | Should Be 1
+        # Formatter caps at three basenames and uses overflow ellipsis; privacy fallback is not a full path.
+        $okCap = Test-Regex -Text $src -Pattern `
+            '(?s)FormatBatchDiagnosticSummary.{0,1200}(失败文件:).{0,400}(\.\.\. \(\+|SplitPath)'
+        $okCap | Should Be $true
+        $okEllipsis = Test-Regex -Text $src -Pattern `
+            '(?s)FormatBatchDiagnosticSummary.{0,1200}\.\.\. \(\+'
+        $okEllipsis | Should Be $true
+        $okSafe = Test-Regex -Text $src -Pattern `
+            '(?s)FormatBatchDiagnosticSummary.{0,1200}未知文件'
+        $okSafe | Should Be $true
+        $okCaller = Test-Regex -Text $src -Pattern `
+            '(?s)ShowBatchDiagnosticSummary\s*\(\)\s*\{.{0,600}FormatBatchDiagnosticSummary\s*\('
+        $okCaller | Should Be $true
+    }
+
     It 'batch buckets are success warning failure skipped' {
         $script:SmartZipSource | Should Match 'success:\s*\[\]'
         $script:SmartZipSource | Should Match 'warning:\s*\[\]'

@@ -15,6 +15,9 @@ $script:CaseKeys = @(
     'button_locate_first', 'button_open_7zip',
     'button_copy_redacted', 'button_close',
     'batch_success', 'batch_warning', 'batch_failure', 'batch_skipped_one_summary',
+    'batch_summary_failed_basenames_max_three',
+    'batch_summary_failed_basenames_ellipsis',
+    'batch_summary_no_password_material',
     'silence_ok_and_cancelled', 'log_warning',
     'rotate_at_1mib', 'rotate_shift_1_to_2', 'rotate_max_three',
     'redact_dash_p', 'copy_basename_only', 'copy_omits_full_path', 'log_allows_full_path',
@@ -414,6 +417,9 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
                 r.batchBucket := s.bucket
             host.ShowDiagnostic(r, true)
         }
+        summaryText := ""
+        if host.HasMethod("FormatBatchDiagnosticSummary")
+            summaryText := host.FormatBatchDiagnosticSummary(host.batchDiagnostic)
         if JsonGetBool(jsonText, "callSummary", true)
             host.ShowBatchDiagnosticSummary()
         return '{"key":"' caseKey '"'
@@ -421,7 +427,39 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
             . ',"warning":' ArrayNamesJson(host.batchDiagnostic.warning)
             . ',"failure":' ArrayNamesJson(host.batchDiagnostic.failure)
             . ',"skipped":' ArrayNamesJson(host.batchDiagnostic.skipped) '}'
+            . ',"summaryText":"' EscapeJson(summaryText) '"'
             . ',"summaryCalls":' host.summaryCalls ',"guiCalls":' host.guiCalls '}'
+    }
+
+    if (cmd = "batch_failures") {
+        ; N DATA_CORRUPT failures with given archive paths; expose FormatBatchDiagnosticSummary text.
+        host.muilt := true
+        host.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
+        paths := []
+        if RegExMatch(jsonText, '"paths"\s*:\s*\[([^\]]*)\]', &pm) {
+            pos := 1
+            hay := pm[1]
+            while RegExMatch(hay, '"((?:\\.|[^"\\])*)"', &m, pos) {
+                paths.Push(JsonUnescape(m[1]))
+                pos := m.Pos + m.Len
+            }
+        }
+        pw := JsonGet(jsonText, "passwordUsed", "")
+        for p in paths {
+            r := MakeResult(ArchiveStatus.DATA_CORRUPT, p)
+            if (pw != "")
+                r.passwordUsed := JsonUnescape(pw)
+            host.ShowDiagnostic(r, true)
+        }
+        if !host.HasMethod("FormatBatchDiagnosticSummary")
+            return '{"key":"' caseKey '","error":"FormatBatchDiagnosticSummary missing","summaryText":"","summaryCalls":' host.summaryCalls ',"guiCalls":' host.guiCalls '}'
+        summaryText := host.FormatBatchDiagnosticSummary(host.batchDiagnostic)
+        if JsonGetBool(jsonText, "callSummary", true)
+            host.ShowBatchDiagnosticSummary()
+        return '{"key":"' caseKey '"'
+            . ',"summaryText":"' EscapeJson(summaryText) '"'
+            . ',"summaryCalls":' host.summaryCalls ',"guiCalls":' host.guiCalls
+            . ',"failureCount":' host.batchDiagnostic.failure.Length '}'
     }
 
     if (cmd = "log" || cmd = "silence") {
@@ -865,6 +903,62 @@ Describe 'DiagnosticUI' {
             -Json '{"callSummary":true}' -StageDir $script:StageDir
         ($out -match '"skipped":\[[^\]]*"d\.zip"') | Should Be $true
         ($out -match 'e\.part02\.rar') | Should Be $true
+        (Get-JsonField $out 'summaryCalls') | Should Be '1'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
+    }
+
+    It 'batch_summary_failed_basenames_max_three' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' -CaseKey 'batch_summary_failed_basenames_max_three' `
+            -Json '{"paths":["D:\\x\\a.7z","D:\\x\\b.7z","D:\\x\\c.7z"]}' -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        ($null -ne $summary -and $summary.Length -gt 0) | Should Be $true
+        # Preserve existing count lines
+        ($summary -match '成功:\s*0') | Should Be $true
+        ($summary -match '警告:\s*0') | Should Be $true
+        ($summary -match '失败:\s*3') | Should Be $true
+        ($summary -match '跳过:\s*0') | Should Be $true
+        ($summary -match '失败文件:') | Should Be $true
+        # Exactly the three basenames; no drive/directory prefix leak
+        ($summary -match 'a\.7z') | Should Be $true
+        ($summary -match 'b\.7z') | Should Be $true
+        ($summary -match 'c\.7z') | Should Be $true
+        ($summary -match 'D:\\') | Should Be $false
+        ($summary -match 'D:') | Should Be $false
+        ($summary -match '\\x\\') | Should Be $false
+        ($summary -match '\.\.\.') | Should Be $false
+        (Get-JsonField $out 'summaryCalls') | Should Be '1'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
+    }
+
+    It 'batch_summary_failed_basenames_ellipsis' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' -CaseKey 'batch_summary_failed_basenames_ellipsis' `
+            -Json '{"paths":["D:\\x\\a.7z","D:\\x\\b.7z","D:\\x\\c.7z","D:\\x\\d.7z"]}' -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        ($null -ne $summary -and $summary.Length -gt 0) | Should Be $true
+        ($summary -match '失败:\s*4') | Should Be $true
+        ($summary -match 'a\.7z') | Should Be $true
+        ($summary -match 'b\.7z') | Should Be $true
+        ($summary -match 'c\.7z') | Should Be $true
+        # Fourth basename omitted; exact overflow count
+        ($summary -match 'd\.7z') | Should Be $false
+        ($summary -match '\.\.\. \(\+1\)') | Should Be $true
+        ($summary -match 'D:\\') | Should Be $false
+        ($summary -match 'D:') | Should Be $false
+        ($summary -match '\\x\\') | Should Be $false
+        (Get-JsonField $out 'summaryCalls') | Should Be '1'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
+    }
+
+    It 'batch_summary_no_password_material' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' -CaseKey 'batch_summary_no_password_material' `
+            -Json '{"paths":["D:\\secret\\vault.7z"],"passwordUsed":"S3cret!"}' -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        ($null -ne $summary -and $summary.Length -gt 0) | Should Be $true
+        ($summary -match 'vault\.7z') | Should Be $true
+        ($summary -match 'S3cret') | Should Be $false
+        ($summary -match 'passwordUsed') | Should Be $false
+        ($summary -match 'D:\\') | Should Be $false
+        ($summary -match 'secret') | Should Be $false
         (Get-JsonField $out 'summaryCalls') | Should Be '1'
         (Get-JsonField $out 'guiCalls') | Should Be '0'
     }

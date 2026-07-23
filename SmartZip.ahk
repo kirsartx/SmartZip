@@ -1699,21 +1699,54 @@ class SmartZip
             this.WriteDiagnostic(result)
     }
 
+    FormatBatchDiagnosticSummary(b) {
+        sc := b.success.Length
+        wc := b.warning.Length
+        fc := b.failure.Length
+        kc := b.skipped.Length
+        msg := "批量解压完成`n成功: " sc "`n警告: " wc "`n失败: " fc "`n跳过: " kc
+        if (fc > 0) {
+            names := []
+            limit := fc < 3 ? fc : 3
+            i := 1
+            while (i <= limit) {
+                p := b.failure[i].archivePath
+                bn := ""
+                try SplitPath(p, &bn)
+                catch {
+                    bn := ""
+                }
+                if (bn = "")
+                    bn := "(未知文件)"
+                names.Push(bn)
+                i++
+            }
+            msg .= "`n失败文件: "
+            j := 1
+            while (j <= names.Length) {
+                if (j > 1)
+                    msg .= ", "
+                msg .= names[j]
+                j++
+            }
+            if (fc > 3)
+                msg .= " ... (+" (fc - 3) ")"
+        }
+        return msg
+    }
+
     ShowBatchDiagnosticSummary() {
         if this.HasOwnProp("summaryCalls")
             this.summaryCalls++
         if !this.HasOwnProp("batchDiagnostic")
             return
         b := this.batchDiagnostic
-        sc := b.success.Length
-        wc := b.warning.Length
-        fc := b.failure.Length
-        kc := b.skipped.Length
+        msg := this.FormatBatchDiagnosticSummary(b)
+        this.lastBatchSummaryText := msg
         if this.HasOwnProp("diagHeadless") && this.diagHeadless {
             this.guiCalls := this.HasOwnProp("guiCalls") ? this.guiCalls : 0
             return
         }
-        msg := "批量解压完成`n成功: " sc "`n警告: " wc "`n失败: " fc "`n跳过: " kc
         try TrayTip("SmartZip", msg)
         catch {
             MsgBox(msg, "SmartZip 批量摘要", "Iconi T5")
