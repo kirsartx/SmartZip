@@ -1062,7 +1062,9 @@ Describe 'DiagnosticUISafety' {
     }
 
     It 'ShowDiagnostic and WriteDiagnostic public signatures unchanged' {
-        $script:SmartZipSource | Should Match '(?m)^    ShowDiagnostic\(result,\s*isBatch\s*:=\s*false\)'
+        # Optional allowPasswordRetry defaults true so existing callers stay unchanged.
+        $script:SmartZipSource | Should Match '(?m)^    ShowDiagnostic\(result,\s*isBatch\s*:=\s*false,\s*allowPasswordRetry\s*:=\s*true\)'
+        $script:SmartZipSource | Should Match '(?m)^    DiagnosticButtons\(result(?:,\s*allowPasswordRetry\s*:=\s*true)?\)'
         $script:SmartZipSource | Should Match '(?m)^    WriteDiagnostic\(result\)'
         $script:SmartZipSource | Should Not Match '(?m)^    ShowDiagnostic\([^)]*isBatch\s*:=\s*true'
         $script:SmartZipSource | Should Not Match '(?m)^    WriteDiagnostic\(result\s*,'
@@ -1318,6 +1320,35 @@ Describe 'DiagnosticUISafety' {
         $preflightFallThrough = Test-Regex -Text $u -Pattern `
             '(?s)resolved\s*:=\s*shown\s*\r?\n\s*;[^\r\n]*fall through'
         $preflightFallThrough | Should Be $false
+    }
+
+    It 'zipx post-budget password diagnostics disable retry button' {
+        $u = $script:UnzipBody
+        if ([string]::IsNullOrEmpty($u)) { $u = $script:SmartZipSource }
+        $src = $script:SmartZipSource
+        # Product gate: DiagnosticButtons only offers 重新输入密码 when allowPasswordRetry is true
+        $btn = $script:DiagnosticButtonsBody
+        if ([string]::IsNullOrEmpty($btn)) { $btn = $src }
+        $btn | Should Match '(?m)^    DiagnosticButtons\(result,\s*allowPasswordRetry\s*:=\s*true\)'
+        $btnGate = Test-Regex -Text $btn -Pattern `
+            '(?s)if\s*\(\s*allowPasswordRetry\b.{0,240}重新输入密码'
+        $btnGate | Should Be $true
+        # Test-failure diagnostic site passes budget availability (A_Index = 1)
+        $testSite = Test-Regex -Text $u -Pattern `
+            'ShowDiagnostic\(\s*tr\s*,\s*isBatch\s*,\s*A_Index\s*=\s*1\s*\)'
+        $testSite | Should Be $true
+        # Final extract diagnostic (and any extractResult ShowDiagnostic after password path)
+        # must pass A_Index = 1 so iteration-2 failures stay informative-only
+        $extractSites = [regex]::Matches($u,
+            'ShowDiagnostic\(\s*extractResult\s*,\s*isBatch\s*,\s*A_Index\s*=\s*1\s*\)')
+        ($extractSites.Count -ge 1) | Should Be $true
+        # No bare extract/test password ShowDiagnostic that always allows retry
+        $bareTest = Test-Regex -Text $u -Pattern `
+            'ShowDiagnostic\(\s*tr\s*,\s*isBatch\s*\)\s*'
+        $bareTest | Should Be $false
+        $bareExtract = Test-Regex -Text $u -Pattern `
+            'ShowDiagnostic\(\s*extractResult\s*,\s*isBatch\s*\)\s*'
+        $bareExtract | Should Be $false
     }
 }
 

@@ -11,7 +11,8 @@ $script:CaseKeys = @(
     'reason_HEADER_CORRUPT', 'reason_TRUNCATED', 'reason_DATA_CORRUPT', 'reason_CANCELLED',
     'reason_IO_ERROR', 'reason_UNKNOWN_ERROR',
     'title_warning', 'title_failure',
-    'button_partial', 'button_retry_password', 'button_locate_first', 'button_open_7zip',
+    'button_partial', 'button_retry_password', 'button_retry_password_disabled',
+    'button_locate_first', 'button_open_7zip',
     'button_copy_redacted', 'button_close',
     'batch_success', 'batch_warning', 'batch_failure', 'batch_skipped_one_summary',
     'silence_ok_and_cancelled', 'log_warning',
@@ -383,9 +384,11 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
         if (partial != "" && JsonGetBool(jsonText, "partialExists", true)) {
             try DirCreate(partial)
         }
+        ; Default true preserves Task 4 callers; false omits password retry (exhausted recovery budget).
+        allowPasswordRetry := JsonGetBool(jsonText, "allowPasswordRetry", true)
         title := host.DiagnosticTitle(r)
-        buttons := host.DiagnosticButtons(r)
-        host.ShowDiagnostic(r, false)
+        buttons := host.DiagnosticButtons(r, allowPasswordRetry)
+        host.ShowDiagnostic(r, false, allowPasswordRetry)
         showGui := host.guiCalls > 0
         bn := ""
         if (r.archivePath != "")
@@ -794,6 +797,19 @@ Describe 'DiagnosticUI' {
         (Test-JsonHasButton $out '重新输入密码') | Should Be $true
         (Test-JsonHasButton $out '使用 7-Zip 打开') | Should Be $true
         (Test-JsonHasButton $out '定位首卷') | Should Be $false
+        (Get-JsonField $out 'showGui') | Should Be 'true'
+    }
+
+    It 'button_retry_password_disabled' {
+        # When recovery budget is exhausted, password-class diagnostics stay informative
+        # but must not offer 重新输入密码 (success would be discarded by zipx).
+        $out = Invoke-DiagnosticUICase -Command 'buttons' -CaseKey 'button_retry_password_disabled' `
+            -Json '{"status":"WRONG_PASSWORD","archivePath":"D:\\data\\secret.7z","partialOutputDir":"","partialExists":false,"allowPasswordRetry":false}' `
+            -StageDir $script:StageDir
+        (Test-JsonHasButton $out '重新输入密码') | Should Be $false
+        (Test-JsonHasButton $out '使用 7-Zip 打开') | Should Be $true
+        (Test-JsonHasButton $out '复制脱敏诊断信息') | Should Be $true
+        (Test-JsonHasButton $out '关闭') | Should Be $true
         (Get-JsonField $out 'showGui') | Should Be 'true'
     }
 

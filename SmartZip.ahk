@@ -460,7 +460,8 @@ class SmartZip
                         this.error := true
                         if (tr.status = ArchiveStatus.CANCELLED)
                             this.exitCode := 255
-                        shown := this.ShowDiagnostic(tr, isBatch)
+                        ; Budget available only on first shared-pipeline attempt
+                        shown := this.ShowDiagnostic(tr, isBatch, A_Index = 1)
                         if (!isBatch
                             && (tr.status = ArchiveStatus.NEED_PASSWORD || tr.status = ArchiveStatus.WRONG_PASSWORD)
                             && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
@@ -499,7 +500,7 @@ class SmartZip
                 if (!isBatch
                     && (extractResult.status = ArchiveStatus.NEED_PASSWORD || extractResult.status = ArchiveStatus.WRONG_PASSWORD)
                     && A_Index = 1) {
-                    shown := this.ShowDiagnostic(extractResult, isBatch)
+                    shown := this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
                     if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
                         resolved := shown
                         ; temp already finalized away (moved/deleted); resume once
@@ -508,7 +509,8 @@ class SmartZip
                     return
                 }
 
-                this.ShowDiagnostic(extractResult, isBatch)
+                ; Iteration 2 password failures: informative only (no discarded-success retry)
+                this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
                 break
             }
         }
@@ -1597,13 +1599,14 @@ class SmartZip
         }
     }
 
-    DiagnosticButtons(result) {
+    DiagnosticButtons(result, allowPasswordRetry := true) {
         buttons := []
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
             return buttons
         if (result.partialOutputDir != "" && DirExist(result.partialOutputDir))
             buttons.Push("打开部分文件目录")
-        if (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD)
+        if (allowPasswordRetry
+            && (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD))
             buttons.Push("重新输入密码")
         if (result.status = ArchiveStatus.MISSING_VOLUME)
             buttons.Push("定位首卷")
@@ -1737,7 +1740,7 @@ class SmartZip
         FileMove(logPath, logPath ".1", 1)
     }
 
-    ShowDiagnostic(result, isBatch := false) {
+    ShowDiagnostic(result, isBatch := false, allowPasswordRetry := true) {
         if IsSet(SmartZipTest_OnResult)
             SmartZipTest_OnResult(result)
         if isBatch {
@@ -1750,7 +1753,7 @@ class SmartZip
         title := this.DiagnosticTitle(result)
         reason := this.DiagnosticReason(result)
         recommendation := this.DiagnosticRecommendation(result)
-        buttons := this.DiagnosticButtons(result)
+        buttons := this.DiagnosticButtons(result, allowPasswordRetry)
         archiveName := result.archivePath
         SplitPath(result.archivePath, &archiveName)
         partialPath := result.partialOutputDir
