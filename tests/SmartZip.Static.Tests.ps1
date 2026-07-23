@@ -1291,9 +1291,11 @@ Describe 'DiagnosticUISafety' {
         $ok = Test-Regex -Text $u -Pattern `
             '(?s)ShowDiagnostic\(.+?(ExtractArchiveToTemp|TestArchive)\s*\('
         $ok | Should Be $true
-        # Must not permanently return after every ShowDiagnostic without inspecting status
+        # Captured diagnostic result must not return immediately without status inspection
+        # (bare this.ShowDiagnostic(...); return volume early-outs are fine; capture+return is not)
         $deadEndOnly = Test-Regex -Text $u -Pattern `
-            '(?s)ShowDiagnostic\([^)]*\)\s*\r?\n\s*return\s*\r?\n\s*\}'
+            '(?s)(shown|diagResult|recovered)\s*:=\s*this\.ShowDiagnostic\([^)]*\)\s*\r?\n\s*return\b'
+        $deadEndOnly | Should Be $false
         # Allow some returns, but require at least one status check on the returned object
         $statusCheck = Test-Regex -Text $u -Pattern `
             '(?s)(shown|diagResult|recovered)\.[Ss]tatus\s*=\s*ArchiveStatus\.(OK|OK_WITH_WARNING)'
@@ -1305,6 +1307,17 @@ Describe 'DiagnosticUISafety' {
         # Single shared extract call site in zipx (no duplicated extract path)
         $extractCalls = [regex]::Matches($u, 'ExtractArchiveToTemp\s*\(')
         $extractCalls.Count | Should Be 1
+        # Exactly three successful recovery assignments; each must consume Loop budget via nearby continue
+        # (preflight fall-through at A_Index=1 would leave budget open for a second recovery)
+        $assignCount = [regex]::Matches($u, 'resolved\s*:=\s*shown').Count
+        $assignCount | Should Be 3
+        $assignThenContinue = [regex]::Matches($u,
+            '(?s)resolved\s*:=\s*shown(?:[^\n]*\r?\n\s*(?:;[^\r\n]*)?)*?\r?\n\s*continue\b')
+        $assignThenContinue.Count | Should Be 3
+        # Preflight recovery must not fall through on iteration 1 (budget already spent)
+        $preflightFallThrough = Test-Regex -Text $u -Pattern `
+            '(?s)resolved\s*:=\s*shown\s*\r?\n\s*;[^\r\n]*fall through'
+        $preflightFallThrough | Should Be $false
     }
 }
 

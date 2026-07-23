@@ -428,10 +428,11 @@ class SmartZip
                         this.exitCode := 255
                     shown := this.ShowDiagnostic(resolved, isBatch)
                     if (!isBatch
+                        && (resolved.status = ArchiveStatus.NEED_PASSWORD || resolved.status = ArchiveStatus.WRONG_PASSWORD)
                         && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
                         && A_Index = 1) {
                         resolved := shown
-                        ; fall through into shared pipeline below
+                        continue  ; consume shared recovery budget; iteration 2 recomputes flags + pipeline
                     } else {
                         return
                     }
