@@ -675,6 +675,23 @@ Describe 'PasswordPreflightSafety' {
         ($inc -ge 0 -and $cls -gt $inc) | Should Be $true
     }
 
+    It 'production SmartZip.ahk includes ArchiveDiagnostics library' {
+        $script:SmartZipSource | Should Match '(?m)^#Include\s+lib\\ArchiveDiagnostics\.ahk\s*$'
+    }
+
+    It 'production SmartZip.ahk does not include IntegrationTestHook' {
+        $script:SmartZipSource | Should Not Match 'IntegrationTestHook'
+        $script:SmartZipSource | Should Not Match '(?i)#Include\s+\*?i?\s*tests\\'
+    }
+
+    It 'production source keeps IsSet test hook guards without defining callbacks' {
+        $script:SmartZipSource | Should Match 'IsSet\(\s*SmartZipTest_OnResult\s*\)'
+        $script:SmartZipSource | Should Match 'IsSet\(\s*SmartZipTest_SuppressGui\s*\)'
+        $script:SmartZipSource | Should Match 'IsSet\(\s*SmartZipTest_PasswordDialog\s*\)'
+        $script:SmartZipSource | Should Not Match '(?m)^SmartZipTest_OnResult\s*\('
+        $script:SmartZipSource | Should Not Match '(?m)^SmartZipTest_PasswordDialog\s*\('
+    }
+
     It 'ProbeArchive method exists before TestArchive' {
         [string]::IsNullOrEmpty($script:ProbeArchiveBody) | Should Be $false
         $script:ProbeArchiveBody | Should Match 'ProbeArchive\s*\('

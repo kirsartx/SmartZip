@@ -1,10 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Real 7-Zip + compiled SmartZip integration suite (Task 8) — exactly 30 It blocks.
+  Real 7-Zip + compiled SmartZip integration suite — TEMP hook injection only.
 .NOTES
-  Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs2-<guid>.
+  Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs3-<guid>.
   Never reads/writes C:\Tool\SmartZip. Passwords stay process-env only.
+  Engine: hard-coded C:\Tool\7-Zip-Zstandard\7z.exe (user engine directory).
 #>
 $ErrorActionPreference = 'Stop'
 if (-not $PSScriptRoot) {
@@ -131,7 +132,7 @@ Describe 'Real7Zip Integration' {
             $script:SkipReason = "scenario runner missing"
         }
 
-        $script:TempRoot = Join-Path $env:TEMP ('SmartZip-Kirs2-' + [guid]::NewGuid().ToString('N'))
+        $script:TempRoot = Join-Path $env:TEMP ('SmartZip-Kirs3-' + [guid]::NewGuid().ToString('N'))
         Assert-NoDeployedSmartZipAccess $script:TempRoot
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
@@ -145,35 +146,62 @@ Describe 'Real7Zip Integration' {
         [Environment]::SetEnvironmentVariable('SMARTZIP_FIXTURE_WRONG_PASSWORD', $script:WrongPassword, 'Process')
 
         $script:CompiledExe = $null
+        $script:InjectedSmartZipPath = $null
         $script:ManifestPath = $null
         $script:Manifest = $null
         $script:CachedRuns = @{}
 
         if (-not $script:SkipReason) {
             try {
-                # Stage TEMP compile tree with tests\IntegrationTestHook.ahk present
+                # Stage TEMP compile tree: inject IntegrationTestHook after ArchiveDiagnostics only
                 $buildRoot = Join-Path $script:TempRoot 'build-src'
                 $libDir = Join-Path $buildRoot 'lib'
                 $testsDir = Join-Path $buildRoot 'tests'
                 New-Item -ItemType Directory -Path $libDir, $testsDir -Force | Out-Null
-                Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'SmartZip.ahk') -Destination (Join-Path $buildRoot 'SmartZip.ahk') -Force
+                $prodSmartZip = Join-Path $script:RepoRoot 'SmartZip.ahk'
+                $prodText = Get-Content -LiteralPath $prodSmartZip -Raw -Encoding UTF8
+                if ($prodText -match 'IntegrationTestHook') {
+                    throw 'production SmartZip.ahk must not reference IntegrationTestHook'
+                }
+                if ($prodText -notmatch '(?m)^#Include\s+lib\\ArchiveDiagnostics\.ahk\s*$') {
+                    throw 'production SmartZip.ahk missing ArchiveDiagnostics include'
+                }
+                $anchorMatches = [regex]::Matches($prodText, '(?m)^#Include\s+lib\\ArchiveDiagnostics\.ahk\s*$')
+                if ($anchorMatches.Count -ne 1) {
+                    throw "ArchiveDiagnostics include anchor count must be exactly 1, got $($anchorMatches.Count)"
+                }
+                $injected = [regex]::Replace(
+                    $prodText,
+                    '(?m)^(#Include\s+lib\\ArchiveDiagnostics\.ahk)\s*$',
+                    "`$1`r`n#Include *i tests\IntegrationTestHook.ahk",
+                    1
+                )
+                if ($injected -eq $prodText) {
+                    throw 'failed to inject IntegrationTestHook after ArchiveDiagnostics include'
+                }
+                if (([regex]::Matches($injected, '(?m)^#Include\s+\*i\s+tests\\IntegrationTestHook\.ahk\s*$')).Count -ne 1) {
+                    throw 'injected IntegrationTestHook include must appear exactly once'
+                }
+                $script:InjectedSmartZipPath = Join-Path $buildRoot 'SmartZip.ahk'
+                [IO.File]::WriteAllText($script:InjectedSmartZipPath, $injected, [Text.UTF8Encoding]::new($false))
                 Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'lib\ArchiveDiagnostics.ahk') -Destination (Join-Path $libDir 'ArchiveDiagnostics.ahk') -Force
                 if (Test-Path -LiteralPath (Join-Path $script:RepoRoot 'ico.ico')) {
                     Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'ico.ico') -Destination (Join-Path $buildRoot 'ico.ico') -Force
                 }
                 Copy-Item -LiteralPath $script:HookAhk -Destination (Join-Path $testsDir 'IntegrationTestHook.ahk') -Force
 
+                # Compile TEMP-injected SmartZip.ahk only — never compile repo SmartZip.ahk for integration
                 $outExe = Join-Path $script:TempRoot 'SmartZip-Integration.exe'
                 $baseAhk = Join-Path (Split-Path $script:AhkExe -Parent) 'AutoHotkey64.exe'
                 $p = Start-Process -FilePath $script:Ahk2Exe -ArgumentList @(
-                    '/in', (Join-Path $buildRoot 'SmartZip.ahk'),
+                    '/in', $script:InjectedSmartZipPath,
                     '/out', $outExe,
                     '/base', $baseAhk,
                     '/silent'
                 ) -Wait -PassThru -NoNewWindow
                 if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outExe)) {
                     $p2 = Start-Process -FilePath $script:Ahk2Exe -ArgumentList @(
-                        '/in', (Join-Path $buildRoot 'SmartZip.ahk'),
+                        '/in', $script:InjectedSmartZipPath,
                         '/out', $outExe,
                         '/base', $baseAhk
                     ) -Wait -PassThru -NoNewWindow
@@ -241,6 +269,27 @@ Describe 'Real7Zip Integration' {
             $script:CachedRuns[$cacheKey] = Invoke-Scenario -Scenario $Scenario -DelSource $DelSource -PasswordMode $PasswordMode
         }
         return $script:CachedRuns[$cacheKey]
+    }
+
+    # ---- TEMP injection contract (production source remains hook-free) ----
+
+    It 'integration compile source injects hook after ArchiveDiagnostics include' {
+        if (-not (Ensure-Ready)) { return }
+        $tempSrc = Get-Content -LiteralPath $script:InjectedSmartZipPath -Raw -Encoding UTF8
+        $tempSrc | Should Match '(?m)^#Include\s+lib\\ArchiveDiagnostics\.ahk\s*$'
+        $tempSrc | Should Match '(?m)^#Include\s+\*i\s+tests\\IntegrationTestHook\.ahk\s*$'
+        $libIdx = $tempSrc.IndexOf('#Include lib\ArchiveDiagnostics.ahk')
+        $hookIdx = $tempSrc.IndexOf('#Include *i tests\IntegrationTestHook.ahk')
+        $classIdx = $tempSrc.IndexOf('class SmartZip')
+        ($libIdx -ge 0 -and $hookIdx -gt $libIdx -and $classIdx -gt $hookIdx) | Should Be $true
+    }
+
+    It 'repository SmartZip.ahk has no hook include while TEMP source does' {
+        if (-not (Ensure-Ready)) { return }
+        $repo = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'SmartZip.ahk') -Raw -Encoding UTF8
+        $repo | Should Not Match 'IntegrationTestHook'
+        $tempSrc = Get-Content -LiteralPath $script:InjectedSmartZipPath -Raw -Encoding UTF8
+        $tempSrc | Should Match 'IntegrationTestHook'
     }
 
     # ---- 14 fixture/scenario terminal-status assertions ----

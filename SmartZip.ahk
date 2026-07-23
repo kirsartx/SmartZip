@@ -31,7 +31,6 @@ else
     Setting
 
 #Include lib\ArchiveDiagnostics.ahk
-#Include *i tests\IntegrationTestHook.ahk
 class SmartZip
 {
     __New(sevenZipDir)
