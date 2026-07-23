@@ -528,7 +528,7 @@ class SmartZip
                         ; temp already finalized away (moved/deleted); resume once
                         continue
                     }
-                    return
+                    return shown
                 }
 
                 ; Iteration 2 password failures: informative only (no discarded-success retry)

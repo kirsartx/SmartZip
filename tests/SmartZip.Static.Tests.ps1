@@ -1593,6 +1593,18 @@ Describe 'Kirs4ZipxOutcomeContract' {
         ($returns.Count -ge 3) | Should Be $true
     }
 
+    It 'zipx has no bare return on any terminal path' {
+        $zipxBody = Get-SourceSlice -Source $script:UnzipBody `
+            -StartMarker "`n        zipx(path)" -EndMarker "`n        ;解压嵌套"
+        [string]::IsNullOrEmpty($zipxBody) | Should Be $false
+
+        # A bare return yields no ArchiveResult. Scan the entire zipx body so future
+        # branches cannot bypass the outer outputState contract by using a new name.
+        $bareReturns = [regex]::Matches($zipxBody,
+            '(?m)^[\t ]*return(?:[\t ]*;[^\r\n]*)?[\t ]*\r?$')
+        $bareReturns.Count | Should Be 0
+    }
+
     It 'outer Unzip promotes only when outputState is usable' {
         $u = $script:UnzipBody
         $ok = Test-Regex -Text $u -Pattern 'outputState\s*=\s*["'']usable["'']|outputState\s*!=\s*["'']usable["'']'
