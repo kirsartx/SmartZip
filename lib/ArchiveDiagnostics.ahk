@@ -181,6 +181,18 @@ RedactDiagnostic(text, includeFullPath := true) {
     return s
 }
 
+_VolHasPatternDEvidence(stem, selIndex, indices) {
+    if (stem ~= "i)\.(7z|zip|rar|tar|wim)$")
+        return true
+    if (selIndex = 1)
+        return true
+    for idx in indices {
+        if (idx >= 1 && idx != selIndex)
+            return true
+    }
+    return false
+}
+
 DetectVolumeGroup(path, siblingNames) {
     empty := { isVolume: false, firstPath: "", members: [], missingVolumes: [], selectedIsFirst: false }
     if (path = "")
@@ -385,6 +397,8 @@ DetectVolumeGroup(path, siblingNames) {
         if (!indexToName.Has(selIndex)) {
             indices.Push(selIndex)
         }
+        if (!_VolHasPatternDEvidence(stem, selIndex, indices))
+            return empty
         return _VolBuildNumericGroup(dir, firstName, sel, selIndex, 1, indices, indexToName)
     }
 

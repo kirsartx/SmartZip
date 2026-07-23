@@ -425,6 +425,58 @@ if (mode = "volumes" || mode = "all") {
     AssertTrue(g.isVolume, "mixed_rar_width_is_volume")
     AssertEq(g.members.Length, 2, "mixed_rar_width_member_count")
     AssertFalse(_ArrayHas(g.members, dir "\backup.r000"), "mixed_rar_width_excludes_other_width")
+
+    ; --- Kirs.3 Pattern D evidence ---
+    siblings := ["report.2024"]
+    g := DetectVolumeGroup(dir "\report.2024", siblings)
+    AssertFalse(g.isVolume, "report_2024_alone_not_volume")
+    AssertEq(g.firstPath, "", "report_2024_alone_empty_first")
+    AssertEq(g.members.Length, 0, "report_2024_alone_empty_members")
+    AssertEq(g.missingVolumes.Length, 0, "report_2024_alone_empty_missing")
+    AssertFalse(g.selectedIsFirst, "report_2024_alone_not_first")
+
+    siblings := ["report.2024", "notes.txt"]
+    g := DetectVolumeGroup(dir "\report.2024", siblings)
+    AssertFalse(g.isVolume, "report_2024_unrelated_not_volume")
+
+    siblings := ["photo.1234"]
+    g := DetectVolumeGroup(dir "\photo.1234", siblings)
+    AssertFalse(g.isVolume, "photo_1234_alone_not_volume")
+
+    siblings := ["data.002"]
+    g := DetectVolumeGroup(dir "\data.002", siblings)
+    AssertFalse(g.isVolume, "bare_002_alone_not_volume")
+    AssertEq(g.missingVolumes.Length, 0, "bare_002_alone_no_missing_list")
+
+    siblings := ["data.001", "data.002"]
+    g := DetectVolumeGroup(dir "\data.002", siblings)
+    AssertTrue(g.isVolume, "bare_002_with_001_is_volume")
+    AssertFalse(g.selectedIsFirst, "bare_002_with_001_not_first")
+    AssertEq(g.firstPath, dir "\data.001", "bare_002_with_001_first_path")
+
+    siblings := ["data.001"]
+    g := DetectVolumeGroup(dir "\data.001", siblings)
+    AssertTrue(g.isVolume, "bare_001_alone_still_volume")
+    AssertTrue(g.selectedIsFirst, "bare_001_alone_is_first")
+
+    siblings := ["pack.zip.001"]
+    g := DetectVolumeGroup(dir "\pack.zip.001", siblings)
+    AssertTrue(g.isVolume, "zip_001_alone_is_volume")
+
+    siblings := ["a.tar.001"]
+    g := DetectVolumeGroup(dir "\a.tar.001", siblings)
+    AssertTrue(g.isVolume, "tar_001_alone_is_volume")
+
+    siblings := ["a.wim.001"]
+    g := DetectVolumeGroup(dir "\a.wim.001", siblings)
+    AssertTrue(g.isVolume, "wim_001_alone_is_volume")
+
+    siblings := ["archive.7z.002"]
+    g := DetectVolumeGroup(dir "\archive.7z.002", siblings)
+    AssertTrue(g.isVolume, "sevenz_002_alone_is_volume")
+    AssertFalse(g.selectedIsFirst, "sevenz_002_alone_not_first")
+    AssertEq(g.firstPath, dir "\archive.7z.001", "sevenz_002_alone_derives_first")
+    AssertTrue(_ArrayHas(g.missingVolumes, "archive.7z.001"), "sevenz_002_alone_missing_001")
 }
 
 summary := "SUMMARY passed=" passCount " failed=" failCount
