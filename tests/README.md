@@ -15,11 +15,11 @@ Integration / smoke never read or write `C:\Tool\SmartZip`. Every archive, INI, 
 
 `%TEMP%\SmartZip-Kirs3-<guid>`
 
-## Exact command order and counts (Task 7 gate; Task 9 finalizes whole-branch)
+## Exact command order and counts (Task 8 whole-branch gate)
 
 ```powershell
 $expected = [ordered]@{
-  'SmartZip.Static.Tests.ps1'=167; 'ArchiveDiagnostics.Tests.ps1'=161
+  'SmartZip.Static.Tests.ps1'=172; 'ArchiveDiagnostics.Tests.ps1'=161
   'RunCmdCapture.Tests.ps1'=15; 'PasswordPreflight.Tests.ps1'=78
   'ExtractionLifecycle.Tests.ps1'=26; 'NestingMigration.Tests.ps1'=30
   'DiagnosticUI.Tests.ps1'=46; 'Real7Zip.Integration.Tests.ps1'=32
@@ -34,7 +34,7 @@ git diff --check
 if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 ```
 
-Expected exact totals after Task 7: static `167/167`, diagnostics `161/161`, capture `15/15`, password/workflow `78/78`, lifecycle `26/26`, nesting `30/30`, UI `46/46`, real integration `32/32`.
+Expected exact totals after Task 8: static `172/172`, diagnostics `161/161`, capture `15/15`, password/workflow `78/78`, lifecycle `26/26`, nesting `30/30`, UI `46/46`, real integration `32/32`.
 
 ## Real-7-Zip integration suite
 

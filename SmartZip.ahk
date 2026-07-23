@@ -5,13 +5,13 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6
-;@Ahk2Exe-SetProductVersion 22
+;@Ahk2Exe-SetProductVersion 23
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 22
+buildVersion := 23
 MainVersion := "3.6"
-edition := "Kirs.2"
+edition := "Kirs.3"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/20 12:56:47"
+buileTime := "2026/7/23 20:43:46"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
@@ -2174,7 +2174,7 @@ Setting()
 
     Tab.UseTab(3)
     lineGeneration()
-    GuiCheckBox("partSkip", ini.partSkip, "跳过分卷压缩包", "第一卷会被解压,其他的跳过`n分卷不会自动删除", "Section")
+    GuiCheckBox("partSkip", ini.partSkip, "分卷同组只解压一次", "任一卷从首卷开始；同组多选只解压一次`n分卷不会自动删除", "Section")
     GuiCheckBox("test", ini.test, "启用测试中的功能", "当前没有测试中功能")
     GuiCheckBox("cmdLog", ini.cmdLog, "启用测试日志", "检查文件时的测试日志,与下文的日志等级无关")
     lineGeneration("xs")
