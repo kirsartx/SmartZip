@@ -117,6 +117,9 @@ class LifecycleHost {
     pathDuplCalls := []
     dirMoves := []
     scriptedExit := 0
+    precreatePartialCandidate := false
+    forceMoveFailure := false
+    precreatedPartialCandidate := ""
     scriptedCap := { exitCode: 2, output: "ERROR: CRC Failed in encrypted file`nData Error", cancelled: false }
     workRoot := ""
 
@@ -126,6 +129,9 @@ class LifecycleHost {
         this.dirMoves := []
         this.exitCode := 0
         this.scriptedExit := 0
+        this.precreatePartialCandidate := false
+        this.forceMoveFailure := false
+        this.precreatedPartialCandidate := ""
     }
 
     SeedFile(path, content := "x") {
@@ -159,11 +165,17 @@ class LifecycleHost {
 
     PathDupl(path, isdir := 0) {
         this.pathDuplCalls.Push(path)
+        if this.precreatePartialCandidate {
+            try DirCreate(path)
+            this.precreatedPartialCandidate := path
+        }
         return path
     }
 
     MoveItem(souce, dest, isdir, lineNum) {
         this.dirMoves.Push({ from: souce, to: dest })
+        if this.forceMoveFailure
+            throw Error("forced partial isolation failure")
         try DirMove(souce, dest)
         catch {
             try FileMove(souce, dest, 1)
@@ -362,6 +374,18 @@ AssertTrue(dStuck.retainedOutputDir != "", "isolate_fail_retained_temp")
 AssertEq(dStuck.sourceAction, "none", "isolate_fail_preserves_source")
 AssertEq(dStuck.tempAction, "keep", "isolate_fail_keeps_temp_not_promoted_by_finalize")
 
+; Candidate partial directories may already exist for unrelated work.  A failed
+; isolation must not expose that directory or write this extraction's diagnostic there.
+host.Reset()
+host.precreatePartialCandidate := true
+host.forceMoveFailure := true
+candidateTmp := host.workRoot "\tmp\candidate-stuck"
+dCandidate := RunFinalizeCase(host, p1, rFail, candidateTmp, o1, true, true, false, false)
+candidateDiag := host.precreatedPartialCandidate "\SmartZip-诊断.txt"
+AssertTrue(dCandidate.partialName = "" && !FileExist(candidateDiag), "isolate_fail_does_not_expose_or_pollute_unverified_candidate")
+host.precreatePartialCandidate := false
+host.forceMoveFailure := false
+
 r6 := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, p1)
 cTmp := host.workRoot "\tmp\c"
 d6 := RunFinalizeCase(host, p1, r6, cTmp, o1, true, false, false, false)
@@ -426,7 +450,7 @@ function Export-ExtractionLifecycleProductHarness {
     # 2. Assert that the isolation helpers, ExtractArchiveToTemp, FinalizeExtraction,
     #    and WriteDiagnostic each occur exactly once in the slice.
     # 3. Generate a TEMP AHK host with only production methods + injectable doubles.
-    # 4. Emit the same 38 named PASS/FAIL keys as the oracle by invoking those
+    # 4. Emit the same 39 named PASS/FAIL keys as the oracle by invoking those
     #    production methods; never call/copy FinalizeDecision.
     # 5. Return the generated absolute .ahk path; throw on any missing marker/key.
     $productHarness = New-ExtractionLifecycleProductHost `
@@ -536,7 +560,8 @@ Describe 'ExtractionLifecycleBehavior' {
         'isolate_fail_output_state_quarantine_failed',
         'isolate_fail_retained_temp',
         'isolate_fail_preserves_source',
-        'isolate_fail_keeps_temp_not_promoted_by_finalize'
+        'isolate_fail_keeps_temp_not_promoted_by_finalize',
+        'isolate_fail_does_not_expose_or_pollute_unverified_candidate'
     )
 
     foreach ($name in $cases) {

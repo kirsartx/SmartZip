@@ -118,6 +118,7 @@ AssertEq(dQf.outputState, "quarantine_failed", "isolate_fail_output_state_quaran
 AssertEq(dQf.retainedOutputDir, "D:\\tmp\\stuck", "isolate_fail_retained_temp")
 AssertEq(dQf.sourceAction, "none", "isolate_fail_preserves_source")
 AssertEq(dQf.tempAction, "keep", "isolate_fail_keeps_temp_not_promoted_by_finalize")
+AssertEq(dQf.partialName, "", "isolate_fail_does_not_expose_or_pollute_unverified_candidate")
 
 ClassifyGuiExtractForOracle(extractExit, testOutput) {
     if (extractExit = 255)

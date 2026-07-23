@@ -1520,7 +1520,7 @@ class SmartZip
                 return result
             }
             result.outputState := "quarantine_failed"
-            result.partialOutputDir := DirExist(partial) ? partial : ""
+            result.partialOutputDir := ""
             result.retainedOutputDir := tempDir
             this.WriteDiagnostic(result)
             return result
