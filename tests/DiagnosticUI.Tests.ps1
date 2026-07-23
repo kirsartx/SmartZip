@@ -17,7 +17,12 @@ $script:CaseKeys = @(
     'silence_ok_and_cancelled', 'log_warning',
     'rotate_at_1mib', 'rotate_shift_1_to_2', 'rotate_max_three',
     'redact_dash_p', 'copy_basename_only', 'copy_omits_full_path', 'log_allows_full_path',
-    'no_password_or_clipboard_leak', 'partial_utf8_diagnostic'
+    'no_password_or_clipboard_leak', 'partial_utf8_diagnostic',
+    'recovery_returns_original_without_retry',
+    'recovery_retry_success_sets_ok_and_closes',
+    'recovery_retry_wrong_keeps_window',
+    'recovery_retry_cancel_keeps_window',
+    'recovery_batch_password_never_opens_gui'
 )
 
 $script:ReasonTable = [ordered]@{
@@ -183,6 +188,10 @@ class DiagnosticUIHost {
     fileDeletes := []
     workRoot := ""
     scriptDirOverride := ""
+    passwordRetryMode := "echo"
+    passwordRetryValue := ""
+    lastRecovery := ""
+    diagAutoClose := true
 
     ScriptDir() {
         if (this.scriptDirOverride != "")
@@ -201,6 +210,9 @@ class DiagnosticUIHost {
         this.fileMoves := []
         this.fileDeletes := []
         this.batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
+        this.lastRecovery := ""
+        this.passwordRetryMode := "echo"
+        this.passwordRetryValue := ""
     }
 
     DiagnosticOpenPath(path) {
@@ -237,6 +249,19 @@ class DiagnosticUIHost {
 
     ResolveArchivePassword(path, probeResult := "") {
         this.runCalls.Push({ kind: "retry_password", path: path })
+        mode := this.HasOwnProp("passwordRetryMode") ? this.passwordRetryMode : "echo"
+        if (mode = "success") {
+            r := ArchiveResult(ArchiveStatus.OK, "password", 0, path, "")
+            r.passwordUsed := this.HasOwnProp("passwordRetryValue") ? this.passwordRetryValue : "GoodPass"
+            return r
+        }
+        if (mode = "wrong") {
+            r := ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "password", 2, path, "")
+            return r
+        }
+        if (mode = "cancel") {
+            return ArchiveResult(ArchiveStatus.CANCELLED, "password", 255, path, "")
+        }
         return probeResult
     }
 
@@ -568,6 +593,45 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
             . ',"content":"' EscapeJson(content) '","returned":"' EscapeJson(text) '"}'
     }
 
+    if (cmd = "recovery") {
+        status := JsonGet(jsonText, "status", "WRONG_PASSWORD")
+        arch := JsonUnescape(JsonGet(jsonText, "archivePath", "D:\\data\\folder\\pack.7z"))
+        mode := JsonGet(jsonText, "retryMode", "echo")
+        host.passwordRetryMode := mode
+        host.passwordRetryValue := JsonGet(jsonText, "retryPassword", "GoodPass")
+        r := MakeResult(status, arch, jsonText)
+        ; Headless path: product ShowDiagnostic builds recovery on lastRecovery (no WinWaitClose).
+        returned := host.ShowDiagnostic(r, false)
+        closed := false
+        if (JsonGetBool(jsonText, "clickRetry", false)) {
+            if !host.HasOwnProp("lastRecovery") || host.lastRecovery = ""
+                return '{"key":"' caseKey '","error":"lastRecovery missing after ShowDiagnostic","returnStatus":"","passwordUsed":"","guiCalls":' host.guiCalls ',"retryCalls":0,"closed":false,"leakedPasswordInCopy":false}'
+            closedFlag := false
+            dummyGui := { Destroy: (*) => (closedFlag := true) }
+            host.DiagnosticButtonAction("重新输入密码", host.lastRecovery, arch, "", "", dummyGui)
+            if (host.lastRecovery.resolved != "")
+                returned := host.lastRecovery.resolved
+            closed := closedFlag
+        }
+        retStatus := ""
+        retPass := ""
+        try {
+            if (returned != "" && returned is Object) {
+                retStatus := returned.status
+                retPass := returned.HasOwnProp("passwordUsed") ? returned.passwordUsed : ""
+            }
+        } catch {
+        }
+        copyText := host.FormatDiagnosticCopy(r)
+        leaked := (retPass != "" && InStr(copyText, retPass) > 0)
+        return '{"key":"' caseKey '","returnStatus":"' EscapeJson(retStatus) '"'
+            . ',"passwordUsed":"' EscapeJson(retPass) '"'
+            . ',"guiCalls":' host.guiCalls
+            . ',"retryCalls":' host.runCalls.Length
+            . ',"closed":' (closed ? "true" : "false")
+            . ',"leakedPasswordInCopy":' (leaked ? "true" : "false") '}'
+    }
+
     return '{"key":"' caseKey '","error":"unknown command","cmd":"' EscapeJson(cmd) '"}'
 }
 '@
@@ -837,5 +901,42 @@ Describe 'DiagnosticUI' {
         $content = Get-JsonField $out 'content'
         ($content -match 'DATA_CORRUPT') | Should Be $true
         ($content -match 'status=') | Should Be $true
+    }
+
+    It 'recovery_returns_original_without_retry' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_returns_original_without_retry' `
+            -Json '{"status":"WRONG_PASSWORD","clickRetry":false}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'WRONG_PASSWORD'
+    }
+    It 'recovery_retry_success_sets_ok_and_closes' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_retry_success_sets_ok_and_closes' `
+            -Json '{"status":"WRONG_PASSWORD","clickRetry":true,"retryMode":"success","retryPassword":"GoodPass"}' `
+            -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'OK'
+        $j.passwordUsed | Should Be 'GoodPass'
+        $j.closed | Should Be $true
+        $j.leakedPasswordInCopy | Should Be $false
+    }
+    It 'recovery_retry_wrong_keeps_window' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_retry_wrong_keeps_window' `
+            -Json '{"status":"WRONG_PASSWORD","clickRetry":true,"retryMode":"wrong"}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'WRONG_PASSWORD'
+        $j.closed | Should Be $false
+    }
+    It 'recovery_retry_cancel_keeps_window' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_retry_cancel_keeps_window' `
+            -Json '{"status":"NEED_PASSWORD","clickRetry":true,"retryMode":"cancel"}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'NEED_PASSWORD'
+        $j.closed | Should Be $false
+    }
+    It 'recovery_batch_password_never_opens_gui' {
+        $out = Invoke-DiagnosticUICase -Command 'batch' -CaseKey 'recovery_batch_password_never_opens_gui' `
+            -Json '{"callSummary":true}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.guiCalls | Should Be 0
     }
 }

@@ -1708,10 +1708,10 @@ class SmartZip
             SmartZipTest_OnResult(result)
         if isBatch {
             this.RecordBatchDiagnostic(result)
-            return
+            return result
         }
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.CANCELLED)
-            return
+            return result
         this.WriteDiagnostic(result)
         title := this.DiagnosticTitle(result)
         reason := this.DiagnosticReason(result)
@@ -1720,13 +1720,19 @@ class SmartZip
         archiveName := result.archivePath
         SplitPath(result.archivePath, &archiveName)
         partialPath := result.partialOutputDir
+        recovery := { original: result, resolved: "" }
 
-        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui
-            return
+        if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
+            this.lastRecovery := recovery
+            return result
+        }
 
         if this.HasOwnProp("diagHeadless") && this.diagHeadless {
             this.DiagnosticShowGui(title, archiveName, reason, recommendation, partialPath, buttons)
-            return
+            this.lastRecovery := recovery
+            if (recovery.resolved != "")
+                return recovery.resolved
+            return result
         }
 
         g := Gui("+AlwaysOnTop +MinSize320x180", title)
@@ -1746,12 +1752,18 @@ class SmartZip
         volumeFirst := result.HasOwnProp("volumeFirst") ? result.volumeFirst : ""
         for item in btnHosts {
             lbl := item.label
-            item.ctrl.OnEvent("Click", (*) => this.DiagnosticButtonAction(lbl, result, archivePath, volumeFirst, partialPath, g))
+            item.ctrl.OnEvent("Click", (*) => this.DiagnosticButtonAction(lbl, recovery, archivePath, volumeFirst, partialPath, g))
         }
+        g.OnEvent("Close", (*) => g.Destroy())
         g.Show("AutoSize Center")
+        WinWaitClose(g.Hwnd)
+        this.lastRecovery := recovery
+        if (recovery.resolved != "")
+            return recovery.resolved
+        return result
     }
 
-    DiagnosticButtonAction(label, result, archivePath, volumeFirst, partialPath, g) {
+    DiagnosticButtonAction(label, recovery, archivePath, volumeFirst, partialPath, g) {
         if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
             if (label = "关闭")
                 try g.Destroy()
@@ -1762,7 +1774,15 @@ class SmartZip
                 if (partialPath != "" && DirExist(partialPath))
                     Run('explorer.exe "' partialPath '"')
             case "重新输入密码":
-                try this.ResolveArchivePassword(archivePath, result)
+                try {
+                    r := this.ResolveArchivePassword(archivePath, recovery.original)
+                    if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
+                        recovery.resolved := r
+                        try g.Destroy()
+                    }
+                    ; wrong/cancel: keep diagnostic open; no source mutation
+                } catch {
+                }
             case "定位首卷":
                 target := volumeFirst != "" ? volumeFirst : archivePath
                 if (target != "" && FileExist(target))
@@ -1778,7 +1798,7 @@ class SmartZip
                 else
                     Run('"' this.7zG '" "' archivePath '"')
             case "复制脱敏诊断信息":
-                clip := this.FormatDiagnosticCopy(result)
+                clip := this.FormatDiagnosticCopy(recovery.original)
                 if this.HasOwnProp("DiagnosticSetClipboard")
                     this.DiagnosticSetClipboard(clip)
                 else

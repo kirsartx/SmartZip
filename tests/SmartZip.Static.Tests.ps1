@@ -1231,6 +1231,29 @@ Describe 'DiagnosticUISafety' {
             'Loging\(\s*RedactDiagnostic\s*\(\s*cmdArgs\s*\).*RedactDiagnostic\s*\(\s*line\s*\)'
         $ok | Should Be $true
     }
+
+    It 'ShowDiagnostic waits with WinWaitClose on interactive GUI path' {
+        $show = $script:ShowDiagnosticBody
+        if ([string]::IsNullOrEmpty($show)) { $show = $script:SmartZipSource }
+        $show | Should Match 'WinWaitClose'
+    }
+
+    It 'DiagnosticButtonAction assigns recovery resolved on password success' {
+        $src = $script:SmartZipSource
+        $src | Should Match '重新输入密码'
+        $ok = Test-Regex -Text $src -Pattern `
+            '(?s)重新输入密码.{0,400}ResolveArchivePassword.{0,400}(resolved|recovery)'
+        $ok | Should Be $true
+    }
+
+    It 'DiagnosticButtonAction never extracts or recycles sources' {
+        $body = Get-SourceSlice -Source $script:SmartZipSource `
+            -StartMarker "`n    DiagnosticButtonAction(" -EndMarker "`n    RunCmdCapture("
+        if ([string]::IsNullOrEmpty($body)) { throw 'DiagnosticButtonAction slice missing' }
+        $body | Should Not Match 'ExtractArchiveToTemp'
+        $body | Should Not Match 'FinalizeExtraction'
+        $body | Should Not Match 'RecycleItem'
+    }
 }
 
 Describe 'Kirs2MetadataAndDocs' {
