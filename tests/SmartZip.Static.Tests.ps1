@@ -247,6 +247,45 @@ Describe 'SettingsUnZipKey' {
     }
 }
 
+Describe 'SettingsAccuracy' {
+
+    It 'settings describe full archive test behavior instead of empty experimental flag' {
+        $src = $script:SmartZipSource
+        $src | Should Not Match '启用测试中的功能'
+        $src | Should Not Match '当前没有测试中功能'
+        $ok = Test-Regex -Text $src -Pattern '完整.*测试|强制.*测试|解压前测试|test.*archive'
+        $ok | Should Be $true
+    }
+
+    It 'settings present volume once-processing as noninteractive explanation' {
+        $src = $script:SmartZipSource
+        # partSkip INI key must remain for compatibility
+        $src | Should Match 'partSkip'
+        # Must not use GuiCheckBox("partSkip" as an effective user switch presentation
+        $legacy = Test-Regex -Text $src -Pattern 'GuiCheckBox\(\s*"partSkip"'
+        $legacy | Should Be $false
+        $ok = Test-Regex -Text $src -Pattern '同组只解压一次|任一卷从首卷'
+        $ok | Should Be $true
+    }
+
+    It 'settings source handling wording uses recycle bin language' {
+        $src = $script:SmartZipSource
+        $ok = Test-Regex -Text $src -Pattern '移入回收站'
+        $ok | Should Be $true
+        # Tips still state clean success only and volumes never auto-handled
+        $ok2 = Test-Regex -Text $src -Pattern '(?s)(完全|干净|成功).{0,40}(回收站|移入)'
+        $ok2 | Should Be $true
+    }
+
+    It 'settings keep nested recycle description separate from top-level source recycle' {
+        $src = $script:SmartZipSource
+        $src | Should Match 'nesting'
+        $src | Should Match 'nestingMuilt'
+        $ok = Test-Regex -Text $src -Pattern '嵌套'
+        $ok | Should Be $true
+    }
+}
+
 Describe 'VersionBanner' {
 
     It 'MainVersion remains numeric 3.6' {

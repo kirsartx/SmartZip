@@ -2266,10 +2266,10 @@ Setting()
     pwdList.OnEvent("Change",(ctrl,info)=> ctrl.ToolTip := passwordMap.Has(ctrl.Text) ? "当前密码使用次数 : " passwordMap[ctrl.Text] : "密码列表")
 
     lineGeneration("xs")
-    GuiCheckBox("nesting", ini.nesting, "解压嵌套压缩包", "解压成功删除源文件,只针对单文件")
-    GuiCheckBox("nestingMuilt", ini.nestingMuilt, "解压嵌套文件夹", "只检查第一层文件夹,解压成功删除源文件", "x+170 yp")
-    GuiCheckBox("delSource", ini.delSource, "解压后删除源文件", "仅在解压成功时删除")
-    GuiCheckBox("delWhenHasPass", ini.delWhenHasPass, "仅删除包含密码的源文件", "不需要选中 解压后删除源文件", "yp x+90")
+    GuiCheckBox("nesting", ini.nesting, "解压嵌套压缩包", "嵌套源包仅在完全干净成功后移入回收站，且仅针对单文件")
+    GuiCheckBox("nestingMuilt", ini.nestingMuilt, "解压嵌套文件夹", "只检查第一层文件夹；嵌套源包仅在完全干净成功后移入回收站", "x+170 yp")
+    GuiCheckBox("delSource", ini.delSource, "解压后将源文件移入回收站", "仅在完全干净成功（无警告）时处理；警告与失败均保留源包；分卷永不自动处理")
+    GuiCheckBox("delWhenHasPass", ini.delWhenHasPass, "仅将含密码的源文件移入回收站", "不需要选中上方源文件选项；同样仅完全干净成功时生效", "yp x+90")
 
     GuiCheckBox("autoAddPass", ini.autoAddPass, "自动添加密码", "在7-Zip输入密码框选中显示密码保存")
     GuiCheckBox("dynamicPassSort", ini.dynamicPassSort, "密码动态排序", "把使用次数最多的排在前面")
@@ -2292,8 +2292,10 @@ Setting()
 
     Tab.UseTab(3)
     lineGeneration()
-    GuiCheckBox("partSkip", ini.partSkip, "分卷同组只解压一次", "任一卷从首卷开始；同组多选只解压一次`n分卷不会自动删除", "Section")
-    GuiCheckBox("test", ini.test, "启用测试中的功能", "当前没有测试中功能")
+    set.AddText("Section w420", "分卷：同组只解压一次（从首卷开始）。此项为说明，不是可关闭开关。兼容保留 ini 键 partSkip。")
+    ; Keep runtime default behavior: Unzip still reads this.partSkip := ini.partSkip for compatibility
+    ; but does not use it as an early-continue switch (Kirs.3 already removed that).
+    GuiCheckBox("test", ini.test, "解压前完整测试压缩包", "启用后始终先完整测试；即使关闭，源文件处理与嵌套回收仍会强制完整测试")
     GuiCheckBox("cmdLog", ini.cmdLog, "启用测试日志", "检查文件时的测试日志,与下文的日志等级无关")
     lineGeneration("xs")
     GuiUpDownEdit("logLevel", "日志等级", ini.logLevel, 5, "关闭0/删除1/重命名2/命令行错误3/命令行正确4/其他5")
