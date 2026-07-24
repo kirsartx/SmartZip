@@ -523,6 +523,45 @@ Describe 'Real7Zip Integration' {
         Assert-SourcePreserved $run
     }
 
+    # ---- 4 extraction outcome-state assertions ----
+
+    It 'valid fixture reports usable outputState' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'valid' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'usable'
+        $run.Result.status | Should Be 'OK'
+    }
+
+    It 'trailingWarning fixture reports usable not clean' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'trailingWarning' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'usable'
+        $run.Result.isCleanSuccess | Should Be $false
+        Assert-SourcePreserved $run
+    }
+
+    It 'crcPartial fixture reports quarantined and not normal target' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'crcPartial' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'quarantined'
+        $run.Result.status | Should Be 'DATA_CORRUPT'
+        $run.PartialDirs.Count | Should Be 1
+        $bad = @($run.TargetInventory | Where-Object {
+            $_ -notmatch '_解压不完整_' -and
+            ($_ -match 'alpha\.txt$' -or $_ -match 'beta\.txt$' -or
+             $_ -match 'alpha\.bin$' -or $_ -match 'beta\.bin$')
+        })
+        $bad.Count | Should Be 0
+    }
+
+    It 'missing volume reports none and no promotion' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'splitMissing' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'none'
+        $run.Result.status | Should Be 'MISSING_VOLUME'
+        Assert-AllVolumeMembersPresent -Run $run -FixtureKey 'splitMissing'
+    }
+
     # ---- 2 secrecy assertions ----
 
     It 'secrecy password absent from result logs and streams; no passwordUsed; no raw -p' {
