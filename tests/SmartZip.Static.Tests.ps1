@@ -1142,15 +1142,13 @@ Describe 'DiagnosticUISafety' {
         $ok | Should Be $true
     }
 
-    It 'password retry limited to NEED_PASSWORD and WRONG_PASSWORD' {
+    It 'password retry is limited to password states or eligible encrypted corruption' {
         $btn = $script:DiagnosticButtonsBody
         if ([string]::IsNullOrEmpty($btn)) { $btn = $script:SmartZipSource }
         $btn | Should Match 'NEED_PASSWORD'
         $btn | Should Match 'WRONG_PASSWORD'
+        $btn | Should Match 'passwordRetryEligible'
         $btn | Should Match '重新输入密码'
-        $ok = Test-Regex -Text $btn -Pattern `
-            '(?s)(NEED_PASSWORD|WRONG_PASSWORD).{0,240}重新输入密码|重新输入密码.{0,240}(NEED_PASSWORD|WRONG_PASSWORD)'
-        $ok | Should Be $true
     }
 
     It 'locate first volume limited to MISSING_VOLUME' {

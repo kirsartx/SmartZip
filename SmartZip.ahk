@@ -1654,6 +1654,8 @@ class SmartZip
             case ArchiveStatus.TRUNCATED:
                 return "压缩包数据被截断。"
             case ArchiveStatus.DATA_CORRUPT:
+                if (result.HasOwnProp("passwordRetryEligible") && result.passwordRetryEligible)
+                    return "CRC 或数据校验失败；密码可能不正确，或加密数据已损坏。"
                 return "CRC 或数据校验失败。"
             case ArchiveStatus.CANCELLED:
                 return "操作已取消。"
@@ -1685,6 +1687,8 @@ class SmartZip
             case ArchiveStatus.TRUNCATED:
                 return "请重新下载或复制完整文件后再试。"
             case ArchiveStatus.DATA_CORRUPT:
+                if (result.HasOwnProp("passwordRetryEligible") && result.passwordRetryEligible)
+                    return "可重新输入密码重试；若仍失败，请保留源包并检查“不完整”目录中的可用文件。"
                 return "请检查“不完整”目录中的可用文件，并重新获取源包。"
             case ArchiveStatus.CANCELLED:
                 return "无需操作。"
@@ -1701,8 +1705,13 @@ class SmartZip
             return buttons
         if (result.partialOutputDir != "" && DirExist(result.partialOutputDir))
             buttons.Push("打开部分文件目录")
+        else if (result.HasOwnProp("retainedOutputDir") && result.retainedOutputDir != ""
+            && DirExist(result.retainedOutputDir))
+            buttons.Push("打开部分文件目录")
+        passwordRetryEligible := result.HasOwnProp("passwordRetryEligible") && result.passwordRetryEligible
         if (allowPasswordRetry
-            && (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD))
+            && (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD
+                || passwordRetryEligible))
             buttons.Push("重新输入密码")
         if (result.status = ArchiveStatus.MISSING_VOLUME)
             buttons.Push("定位首卷")
@@ -1828,6 +1837,15 @@ class SmartZip
             if (fc > 3)
                 msg .= " ... (+" (fc - 3) ")"
         }
+        needsPasswordCheck := false
+        for failed in b.failure {
+            if (failed.passwordRetryEligible) {
+                needsPasswordCheck := true
+                break
+            }
+        }
+        if needsPasswordCheck
+            msg .= "`n提示: 部分加密文件需要检查密码，也可能已损坏。"
         return msg
     }
 
@@ -1886,6 +1904,9 @@ class SmartZip
         archiveName := result.archivePath
         SplitPath(result.archivePath, &archiveName)
         partialPath := result.partialOutputDir
+        if (partialPath = "" && result.outputState = "quarantine_failed"
+            && result.retainedOutputDir != "")
+            partialPath := result.retainedOutputDir
         recovery := { original: result, resolved: "" }
 
         if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
