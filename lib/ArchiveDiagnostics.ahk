@@ -124,7 +124,7 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
             hasIoError := true
             isErr := true
         }
-        if (trimmed ~= "i)^Warnings?:\s*[1-9]" || InStr(trimmed, "There are data after the end of archive") || InStr(trimmed, "WARNINGS:")) {
+        if (trimmed ~= "i)^Warnings?:\s*[1-9]" || InStr(trimmed, "There are data after the end of archive") || InStr(trimmed, "WARNINGS:", true)) {
             hasWarning := true
             isWarn := true
         }

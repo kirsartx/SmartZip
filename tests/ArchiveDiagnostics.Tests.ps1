@@ -218,6 +218,7 @@ Describe 'ArchiveDiagnosticsClassify' {
         'exit1_warning_not_clean_success',
         'exit1_warning_no_delete',
         'exit1_WARNINGS_token_ok_with_warning',
+        'exit1_zero_warning_counter_not_success',
         'exit1_hard_error_beats_warning',
         'exit1_hard_error_not_clean',
         'exit1_header_corrupt_not_warning',
