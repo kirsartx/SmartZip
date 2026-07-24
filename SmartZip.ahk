@@ -1346,28 +1346,43 @@ class SmartZip
 
     ResolveArchivePassword(path, probeResult) {
         st := probeResult.status
-        if (st != ArchiveStatus.NEED_PASSWORD && st != ArchiveStatus.WRONG_PASSWORD)
+        eligible := (st = ArchiveStatus.NEED_PASSWORD || st = ArchiveStatus.WRONG_PASSWORD
+            || (probeResult.HasOwnProp("passwordRetryEligible") && probeResult.passwordRetryEligible))
+        if !eligible
             return probeResult
 
         emptyTry := this.TestArchive(path, "")
         if (emptyTry.status = ArchiveStatus.OK || emptyTry.status = ArchiveStatus.OK_WITH_WARNING)
             return emptyTry
-        if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD)
+        if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD
+            && !(emptyTry.HasOwnProp("passwordRetryEligible") && emptyTry.passwordRetryEligible)
+            && emptyTry.status != ArchiveStatus.DATA_CORRUPT)
             return emptyTry
 
+        last := emptyTry
         for pwd in this.BuildPasswordCandidates(path) {
             r := this.TestArchive(path, pwd)
+            last := r
             if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING)
                 return r
             if (r.status = ArchiveStatus.CANCELLED)
                 return r
-            if (r.status != ArchiveStatus.NEED_PASSWORD && r.status != ArchiveStatus.WRONG_PASSWORD)
+            if (r.status != ArchiveStatus.NEED_PASSWORD && r.status != ArchiveStatus.WRONG_PASSWORD
+                && !(r.HasOwnProp("passwordRetryEligible") && r.passwordRetryEligible)
+                && r.status != ArchiveStatus.DATA_CORRUPT)
                 return r	; non-password status: stop iterating
         }
 
+        ; Batch / multi-select: never interactive password UI
+        if (this.HasOwnProp("muilt") && this.muilt)
+            return last
+
         dlg := this.ShowPasswordDialog(path)
-        if (dlg.action = "cancel" || dlg.password = "")
+        if (dlg.action = "cancel" || dlg.password = "") {
+            if (probeResult.passwordRetryEligible)
+                return probeResult  ; keep DATA_CORRUPT ambiguity; do not relabel cancel
             return ArchiveResult(ArchiveStatus.CANCELLED, "password", -1, path, "")
+        }
 
         r := this.TestArchive(path, dlg.password)
         if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
@@ -1376,6 +1391,8 @@ class SmartZip
             ; "本次使用" does not persist
             return r
         }
+        if (probeResult.passwordRetryEligible && r.status = ArchiveStatus.DATA_CORRUPT)
+            return r
         if (r.status = ArchiveStatus.NEED_PASSWORD || r.status = ArchiveStatus.WRONG_PASSWORD)
             return r  ; submitted-but-wrong stays diagnosable; only explicit cancel is CANCELLED
         return r

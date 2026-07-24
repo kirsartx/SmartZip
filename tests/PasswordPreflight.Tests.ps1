@@ -347,6 +347,7 @@ class PasswordPreflightHost {
     passwordMap := Map()
     testCalls := 0
     rememberCalls := 0
+    dialogCalls := 0
     scriptedCapture := { exitCode: 0, output: "Everything is Ok``n", cancelled: false }
     scriptedTest := Map()
     dialogOverride := ""
@@ -361,6 +362,7 @@ class PasswordPreflightHost {
         this.testLog := ""
         this.testCalls := 0
         this.rememberCalls := 0
+        this.dialogCalls := 0
         this.scriptedTest := Map()
         this.dialogOverride := ""
         this.lastProbeCmd := ""
@@ -440,6 +442,7 @@ PasswordPreflight_TestArchive(this, path, password := "") {
 }
 
 PasswordPreflight_ShowPasswordDialog(this, path) {
+    this.dialogCalls++
     if IsObject(this.dialogOverride)
         return this.dialogOverride
     return { action: "cancel", password: "" }
@@ -536,6 +539,11 @@ Describe 'PasswordPreflightBehavior' {
         'resolve_no_test_calls_IO_ERROR',
         'resolve_passthrough_UNKNOWN_ERROR',
         'resolve_no_test_calls_UNKNOWN_ERROR',
+        'resolve_eligible_data_corrupt_accepts_password',
+        'resolve_eligible_data_corrupt_runs_tests',
+        'resolve_eligible_cancel_keeps_data_corrupt',
+        'batch_resolve_no_success_without_candidates',
+        'batch_resolve_never_opens_password_dialog',
         'resolve_need_password_success_status',
         'resolve_need_password_sets_password_used',
         'resolve_need_password_tried_multiple',
