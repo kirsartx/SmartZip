@@ -13,16 +13,20 @@ Pester **3.4** (classic `Should` syntax) plus AutoHotkey v2 harnesses.
 
 Integration / smoke never read or write `C:\Tool\SmartZip`. Every archive, INI, log, compiled test EXE, and probe artifact stays under one unique:
 
-`%TEMP%\SmartZip-Kirs3-<guid>`
+`%TEMP%\SmartZip-Kirs4-<guid>`
 
-## Exact command order and counts (Task 8 whole-branch gate)
+## Exact command order and counts (Task 9 whole-branch gate)
 
 ```powershell
 $expected = [ordered]@{
-  'SmartZip.Static.Tests.ps1'=172; 'ArchiveDiagnostics.Tests.ps1'=161
-  'RunCmdCapture.Tests.ps1'=15; 'PasswordPreflight.Tests.ps1'=78
-  'ExtractionLifecycle.Tests.ps1'=26; 'NestingMigration.Tests.ps1'=30
-  'DiagnosticUI.Tests.ps1'=46; 'Real7Zip.Integration.Tests.ps1'=32
+  'SmartZip.Static.Tests.ps1'=184
+  'ArchiveDiagnostics.Tests.ps1'=191
+  'RunCmdCapture.Tests.ps1'=15
+  'PasswordPreflight.Tests.ps1'=83
+  'ExtractionLifecycle.Tests.ps1'=39
+  'NestingMigration.Tests.ps1'=30
+  'DiagnosticUI.Tests.ps1'=52
+  'Real7Zip.Integration.Tests.ps1'=36
 }
 foreach ($item in $expected.GetEnumerator()) {
     $r = Invoke-Pester -Script (Join-Path '.\tests' $item.Key) -PassThru
@@ -32,9 +36,12 @@ foreach ($item in $expected.GetEnumerator()) {
 }
 git diff --check
 if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+& 'C:\Tool\7-Zip-Zstandard\7z.exe' i | Select-Object -First 5
 ```
 
-Expected exact totals after Task 8: static `172/172`, diagnostics `161/161`, capture `15/15`, password/workflow `78/78`, lifecycle `26/26`, nesting `30/30`, UI `46/46`, real integration `32/32`.
+Expected exact totals after Task 9: static `184/184`, diagnostics `191/191`, capture `15/15`, password/workflow `83/83`, lifecycle `39/39`, nesting `30/30`, UI `52/52`, real integration `36/36`.
+
+Task 9 starts from the audited Task 8 base at static `182/182` and appends two documentation assertions, so the final static count is `184/184`; the earlier plan arithmetic of `180 + 2 = 182` was stale.
 
 ## Real-7-Zip integration suite
 
@@ -43,7 +50,7 @@ Expected exact totals after Task 8: static `172/172`, diagnostics `161/161`, cap
 | `New-ExtractionReliabilityFixtures.ps1` | Deterministic fixtures via real `7z.exe`; process-only `SMARTZIP_FIXTURE_PASSWORD` |
 | `Invoke-CompiledSmartZipScenario.ps1` | Isolated TEMP scenario runner (120s cap, owned-PID cleanup) |
 | `IntegrationTestHook.ahk` | Test-only callbacks: result JSON, GUI suppress, password dialog |
-| `Real7Zip.Integration.Tests.ps1` | 32 integration assertions (30 scenarios + 2 TEMP-injection contracts) |
+| `Real7Zip.Integration.Tests.ps1` | 36 integration assertions (including output-state fixtures and 2 TEMP-injection contracts) |
 | `Invoke-ProductionSmartZipSmoke.ps1` | Hook-free production smoke (valid / crcPartial / splitMissing / encryptedHeader) |
 | `ProductionSmokeUI.ahk` | Hook-free UI driver (closes warning/incomplete dialogs only) |
 

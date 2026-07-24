@@ -3,7 +3,7 @@
 .SYNOPSIS
   Real 7-Zip + compiled SmartZip integration suite — TEMP hook injection only.
 .NOTES
-  Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs3-<guid>.
+  Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs4-<guid>.
   Never reads/writes C:\Tool\SmartZip. Passwords stay process-env only.
   Engine: hard-coded C:\Tool\7-Zip-Zstandard\7z.exe (user engine directory).
 #>
@@ -132,7 +132,7 @@ Describe 'Real7Zip Integration' {
             $script:SkipReason = "scenario runner missing"
         }
 
-        $script:TempRoot = Join-Path $env:TEMP ('SmartZip-Kirs3-' + [guid]::NewGuid().ToString('N'))
+        $script:TempRoot = Join-Path $env:TEMP ('SmartZip-Kirs4-' + [guid]::NewGuid().ToString('N'))
         Assert-NoDeployedSmartZipAccess $script:TempRoot
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
