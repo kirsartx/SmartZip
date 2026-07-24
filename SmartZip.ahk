@@ -4,8 +4,8 @@
 ;@Ahk2Exe-SetCompanyName  viv
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
-;@Ahk2Exe-SetFileVersion 3.6
-;@Ahk2Exe-SetProductVersion 24
+;@Ahk2Exe-SetFileVersion 3.6.0.0
+;@Ahk2Exe-SetProductVersion 24.0.0.0
 ;@Ahk2Exe-ExeName SmartZip.exe
 buildVersion := 24
 MainVersion := "3.6"

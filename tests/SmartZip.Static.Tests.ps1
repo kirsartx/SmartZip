@@ -305,14 +305,14 @@ Describe 'VersionBanner' {
             Should Match 'buileTime\s*:=\s*"2026/7/24 05:00:00"'
     }
 
-    It 'Ahk2Exe file version remains 3.6' {
+    It 'Ahk2Exe file version uses four-part 3.6.0.0' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
+            Should Match '(?m)^;@Ahk2Exe-SetFileVersion 3\.6\.0\.0\s*$'
     }
 
-    It 'Ahk2Exe product version is 24' {
+    It 'Ahk2Exe product version uses four-part 24.0.0.0' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+24\b'
+            Should Match '(?m)^;@Ahk2Exe-SetProductVersion 24\.0\.0\.0\s*$'
     }
 }
 
