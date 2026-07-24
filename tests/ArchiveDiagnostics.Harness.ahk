@@ -107,6 +107,10 @@ if (mode = "classify" || mode = "all") {
     AssertTrue(r.status != ArchiveStatus.OK && r.status != ArchiveStatus.OK_WITH_WARNING,
         "exit1_zero_warning_counter_not_success")
 
+    r := Classify7zResult("test", 1, "Everything is Ok`nprefix WARNINGS: suffix`n")
+    AssertTrue(r.status != ArchiveStatus.OK && r.status != ArchiveStatus.OK_WITH_WARNING,
+        "exit1_embedded_WARNINGS_token_not_success")
+
     ; Exit 1 + hard-error evidence => not warning success
     r := Classify7zResult("test", 1, "ERROR: CRC Failed`nWarnings: 1`n")
     AssertEq(r.status, ArchiveStatus.DATA_CORRUPT, "exit1_hard_error_beats_warning")

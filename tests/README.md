@@ -15,14 +15,14 @@ Integration / smoke never read or write `C:\Tool\SmartZip`. Every archive, INI, 
 
 `%TEMP%\SmartZip-Kirs4-<guid>`
 
-## Exact command order and counts (Task 9 whole-branch gate)
+## Exact command order and counts (final contract gate)
 
 ```powershell
 $expected = [ordered]@{
   'SmartZip.Static.Tests.ps1'=184
-  'ArchiveDiagnostics.Tests.ps1'=191
+  'ArchiveDiagnostics.Tests.ps1'=193
   'RunCmdCapture.Tests.ps1'=15
-  'PasswordPreflight.Tests.ps1'=83
+  'PasswordPreflight.Tests.ps1'=98
   'ExtractionLifecycle.Tests.ps1'=39
   'NestingMigration.Tests.ps1'=30
   'DiagnosticUI.Tests.ps1'=52
@@ -39,9 +39,9 @@ if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 & 'C:\Tool\7-Zip-Zstandard\7z.exe' i | Select-Object -First 5
 ```
 
-Expected exact totals after Task 9: static `184/184`, diagnostics `191/191`, capture `15/15`, password/workflow `83/83`, lifecycle `39/39`, nesting `30/30`, UI `52/52`, real integration `36/36`.
+Expected exact totals after the final contract fix: static `184/184`, diagnostics `193/193`, capture `15/15`, password/workflow `98/98`, lifecycle `39/39`, nesting `30/30`, UI `52/52`, real integration `36/36`; overall `647/647`.
 
-Task 9 starts from the audited Task 8 base at static `182/182` and appends two documentation assertions, so the final static count is `184/184`; the earlier plan arithmetic of `180 + 2 = 182` was stale.
+The final review adds two executable warning-token assertions and fifteen executable password-recovery contract assertions. The focused six-suite run is `596/596`; capture and real integration retain their unchanged expected counts for the next whole-branch gate.
 
 ## Real-7-Zip integration suite
 

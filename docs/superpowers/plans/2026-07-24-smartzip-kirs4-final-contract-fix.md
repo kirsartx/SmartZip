@@ -53,17 +53,17 @@ Expected: exactly the new case fails because it receives `OK_WITH_WARNING`; reco
 
 - [ ] **Step 3: Make the heading check exact**
 
-Change only the heading branch in `Classify7zResult`:
+Change only the heading branch in `Classify7zResult`; `==` is AutoHotkey's case-sensitive exact string comparison:
 
 ```ahk
 if (trimmed ~= "i)^Warnings?:\s*[1-9]"
     || InStr(trimmed, "There are data after the end of archive")
-    || InStr(trimmed, "WARNINGS:", true)) {
+    || trimmed == "WARNINGS:") {
 ```
 
 - [ ] **Step 4: Run GREEN**
 
-Run the ArchiveDiagnostics suite again. Expected: all cases pass, including the existing `Warnings: 1` and uppercase `WARNINGS:` cases.
+Run the ArchiveDiagnostics suite again. Expected: all cases pass, including `Warnings: 0`, embedded-uppercase-token rejection, and the existing `Warnings: 1` and standalone uppercase `WARNINGS:` cases.
 
 - [ ] **Step 5: Commit Task 1**
 

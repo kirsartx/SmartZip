@@ -76,7 +76,7 @@ This would leave intermediate `DATA_CORRUPT` results internally inconsistent and
 
 Use executable AutoHotkey harnesses, not static source assertions:
 
-- Add one `ArchiveDiagnostics.Harness.ahk` assertion for exit `1` plus `Warnings: 0`. Existing assertions remain the protection for `Warnings: 1` and uppercase `WARNINGS:`.
+- Add `ArchiveDiagnostics.Harness.ahk` assertions for exit `1` plus `Warnings: 0` and for an embedded uppercase token that is not a standalone heading. Existing assertions remain the protection for `Warnings: 1` and standalone uppercase `WARNINGS:`.
 - Add password-harness assertions for batch exhaustion, interactive cancel, inherited flags, dialog count, ordinary CRC, ordinary cancel, and redacted candidate logging.
 - Record each focused suite's failing count before implementation and passing count after implementation.
 - Finish with the focused suites requested by review: ArchiveDiagnostics, PasswordPreflight, DiagnosticUI, SmartZip.Static, ExtractionLifecycle, and NestingMigration.
