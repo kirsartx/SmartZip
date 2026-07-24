@@ -163,6 +163,89 @@ AssertTrue(rBatch.status = ArchiveStatus.NEED_PASSWORD || rBatch.status = Archiv
 AssertEq(host.dialogCalls, 0, "batch_resolve_never_opens_password_dialog")
 host.muilt := false
 
+; Recovery-session evidence must survive empty/candidate DATA_CORRUPT results.
+host.ResetPasswordState()
+host.muilt := true
+batchSecret := "BatchAmbiguousSecret-9f31"
+probeNeedEvidence := ArchiveResult(ArchiveStatus.NEED_PASSWORD, "probe", 2,
+    "C:\\batch-evidence.7z", "Enter password (will not be echoed):`n")
+probeNeedEvidence.encryptionEvidence := true
+host.scriptedTest := Map(
+    "", ArchiveResult(ArchiveStatus.DATA_CORRUPT, "test", 2,
+        "C:\\batch-evidence.7z", "ERROR: Data Error`n"),
+    batchSecret, ArchiveResult(ArchiveStatus.DATA_CORRUPT, "test", 2,
+        "C:\\batch-evidence.7z", "ERROR: Data Error`n")
+)
+host.password := [batchSecret]
+host.dialogOverride := { action: "use", password: "should-not-run" }
+rBatchCorrupt := host.ResolveArchivePassword("C:\\batch-evidence.7z", probeNeedEvidence)
+AssertEq(rBatchCorrupt.status, ArchiveStatus.DATA_CORRUPT, "resolve_batch_corrupt_keeps_status")
+AssertTrue(rBatchCorrupt.encryptionEvidence, "resolve_batch_corrupt_keeps_encryption_evidence")
+AssertTrue(rBatchCorrupt.passwordRetryEligible, "resolve_batch_corrupt_keeps_retry_eligibility")
+AssertEq(host.dialogCalls, 0, "resolve_batch_corrupt_never_opens_dialog")
+AssertFalse(InStr(host.testLog, batchSecret) > 0, "resolve_ambiguous_log_hides_candidate")
+AssertTrue(InStr(host.testLog, "-p***") > 0, "resolve_ambiguous_log_uses_redacted_placeholder")
+
+; NEED_PASSWORD can carry encryption evidence before its retry-eligibility flag is set.
+; If empty-password testing proves ambiguous DATA_CORRUPT, cancel returns that last
+; eligible corruption result instead of erasing it as CANCELLED.
+host.ResetPasswordState()
+host.muilt := false
+probeCancelEvidence := ArchiveResult(ArchiveStatus.NEED_PASSWORD, "probe", 2,
+    "C:\\cancel-evidence.7z", "Enter password (will not be echoed):`n")
+probeCancelEvidence.encryptionEvidence := true
+host.scriptedTest := Map(
+    "", ArchiveResult(ArchiveStatus.DATA_CORRUPT, "test", 2,
+        "C:\\cancel-evidence.7z", "ERROR: Data Error`n")
+)
+host.password := []
+host.dialogOverride := { action: "cancel", password: "" }
+rCancelCorrupt := host.ResolveArchivePassword("C:\\cancel-evidence.7z", probeCancelEvidence)
+AssertEq(rCancelCorrupt.status, ArchiveStatus.DATA_CORRUPT, "resolve_cancel_after_corrupt_keeps_status")
+AssertTrue(rCancelCorrupt.encryptionEvidence, "resolve_cancel_after_corrupt_keeps_encryption_evidence")
+AssertTrue(rCancelCorrupt.passwordRetryEligible, "resolve_cancel_after_corrupt_keeps_retry_eligibility")
+AssertEq(host.dialogCalls, 1, "resolve_cancel_after_corrupt_opens_dialog_once")
+
+; Typed-password DATA_CORRUPT is part of the same recovery session and inherits evidence.
+host.ResetPasswordState()
+host.muilt := false
+probeTypedEvidence := ArchiveResult(ArchiveStatus.NEED_PASSWORD, "probe", 2,
+    "C:\\typed-evidence.7z", "Enter password (will not be echoed):`n")
+probeTypedEvidence.encryptionEvidence := true
+host.scriptedTest := Map(
+    "", ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "test", 2,
+        "C:\\typed-evidence.7z", "ERROR: Wrong password?`n"),
+    "typed-ambiguous", ArchiveResult(ArchiveStatus.DATA_CORRUPT, "test", 2,
+        "C:\\typed-evidence.7z", "ERROR: Data Error`n")
+)
+host.password := []
+host.dialogOverride := { action: "use", password: "typed-ambiguous" }
+rTypedCorrupt := host.ResolveArchivePassword("C:\\typed-evidence.7z", probeTypedEvidence)
+AssertEq(rTypedCorrupt.status, ArchiveStatus.DATA_CORRUPT, "resolve_typed_corrupt_keeps_status")
+AssertTrue(rTypedCorrupt.encryptionEvidence, "resolve_typed_corrupt_keeps_encryption_evidence")
+AssertTrue(rTypedCorrupt.passwordRetryEligible, "resolve_typed_corrupt_keeps_retry_eligibility")
+
+; Controls: ordinary corruption never enters password UI; ordinary cancel is unchanged.
+host.ResetPasswordState()
+host.muilt := false
+plainCorrupt := ArchiveResult(ArchiveStatus.DATA_CORRUPT, "probe", 2,
+    "C:\\plain-crc.7z", "ERROR: CRC Failed`n")
+host.ResolveArchivePassword("C:\\plain-crc.7z", plainCorrupt)
+AssertEq(host.dialogCalls, 0, "resolve_plain_corrupt_never_opens_dialog")
+
+host.ResetPasswordState()
+host.muilt := false
+plainNeed := ArchiveResult(ArchiveStatus.NEED_PASSWORD, "probe", 2,
+    "C:\\plain-cancel.7z", "Enter password (will not be echoed):`n")
+host.scriptedTest := Map(
+    "", ArchiveResult(ArchiveStatus.WRONG_PASSWORD, "test", 2,
+        "C:\\plain-cancel.7z", "ERROR: Wrong password?`n")
+)
+host.password := []
+host.dialogOverride := { action: "cancel", password: "" }
+rPlainCancel := host.ResolveArchivePassword("C:\\plain-cancel.7z", plainNeed)
+AssertEq(rPlainCancel.status, ArchiveStatus.CANCELLED, "resolve_plain_cancel_stays_cancelled")
+
 ; --- NEED_PASSWORD iterates candidates; success sets passwordUsed; logs redact ---
 host.ResetPasswordState()
 host.lastPass := "wrong1"

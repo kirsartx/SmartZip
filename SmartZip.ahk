@@ -1351,7 +1351,18 @@ class SmartZip
         if !eligible
             return probeResult
 
+        recoveryEncryptionEvidence := (probeResult.HasOwnProp("encryptionEvidence")
+                && probeResult.encryptionEvidence)
+            || (probeResult.HasOwnProp("passwordRetryEligible")
+                && probeResult.passwordRetryEligible)
+        lastEligibleCorrupt := ""
+
         emptyTry := this.TestArchive(path, "")
+        if (emptyTry.status = ArchiveStatus.DATA_CORRUPT && recoveryEncryptionEvidence) {
+            emptyTry.encryptionEvidence := true
+            emptyTry.passwordRetryEligible := true
+            lastEligibleCorrupt := emptyTry
+        }
         if (emptyTry.status = ArchiveStatus.OK || emptyTry.status = ArchiveStatus.OK_WITH_WARNING)
             return emptyTry
         if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD
@@ -1363,6 +1374,11 @@ class SmartZip
         for pwd in this.BuildPasswordCandidates(path) {
             r := this.TestArchive(path, pwd)
             last := r
+            if (r.status = ArchiveStatus.DATA_CORRUPT && recoveryEncryptionEvidence) {
+                r.encryptionEvidence := true
+                r.passwordRetryEligible := true
+                lastEligibleCorrupt := r
+            }
             if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING)
                 return r
             if (r.status = ArchiveStatus.CANCELLED)
@@ -1374,24 +1390,34 @@ class SmartZip
         }
 
         ; Batch / multi-select: never interactive password UI
-        if (this.HasOwnProp("muilt") && this.muilt)
+        if (this.HasOwnProp("muilt") && this.muilt) {
+            if IsObject(lastEligibleCorrupt)
+                return lastEligibleCorrupt
             return last
+        }
 
         dlg := this.ShowPasswordDialog(path)
         if (dlg.action = "cancel" || dlg.password = "") {
+            if IsObject(lastEligibleCorrupt)
+                return lastEligibleCorrupt
             if (probeResult.passwordRetryEligible)
                 return probeResult  ; keep DATA_CORRUPT ambiguity; do not relabel cancel
             return ArchiveResult(ArchiveStatus.CANCELLED, "password", -1, path, "")
         }
 
         r := this.TestArchive(path, dlg.password)
+        if (r.status = ArchiveStatus.DATA_CORRUPT && recoveryEncryptionEvidence) {
+            r.encryptionEvidence := true
+            r.passwordRetryEligible := true
+            lastEligibleCorrupt := r
+        }
         if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
             if (dlg.action = "save")
                 this.RememberPassword(dlg.password)
             ; "本次使用" does not persist
             return r
         }
-        if (probeResult.passwordRetryEligible && r.status = ArchiveStatus.DATA_CORRUPT)
+        if (r.status = ArchiveStatus.DATA_CORRUPT && r.passwordRetryEligible)
             return r
         if (r.status = ArchiveStatus.NEED_PASSWORD || r.status = ArchiveStatus.WRONG_PASSWORD)
             return r  ; submitted-but-wrong stays diagnosable; only explicit cancel is CANCELLED
