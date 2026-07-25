@@ -87,6 +87,79 @@ if (mode = "classify" || mode = "all") {
     AssertFalse(warnOnly.isCleanSuccess, "result_is_clean_success_warning_false")
     AssertFalse(warnOnly.mayDeleteSource, "result_may_delete_source_warning_false")
 
+    ; --- Kirs.4 ArchiveResult defaults ---
+    k4 := ArchiveResult(ArchiveStatus.UNKNOWN_ERROR, "probe", -1, "C:\\tmp\\x.7z", "")
+    AssertEq(k4.outputState, "none", "result_output_state_default")
+    AssertFalse(k4.passwordRetryEligible, "result_password_retry_eligible_default")
+    AssertFalse(k4.encryptionEvidence, "result_encryption_evidence_default")
+    AssertEq(k4.retainedOutputDir, "", "result_retained_output_dir_default")
+
+    ; Exit 1 + pure warning evidence => OK_WITH_WARNING
+    r := Classify7zResult("test", 1, "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n")
+    AssertEq(r.status, ArchiveStatus.OK_WITH_WARNING, "exit1_pure_warning_ok_with_warning")
+    AssertFalse(r.isCleanSuccess, "exit1_warning_not_clean_success")
+    AssertFalse(r.mayDeleteSource, "exit1_warning_no_delete")
+
+    r := Classify7zResult("test", 1, "WARNINGS:`nThere are data after the end of archive`n")
+    AssertEq(r.status, ArchiveStatus.OK_WITH_WARNING, "exit1_WARNINGS_token_ok_with_warning")
+
+    r := Classify7zResult("test", 1, "Everything is Ok`nWarnings: 0`n")
+    AssertTrue(r.status != ArchiveStatus.OK && r.status != ArchiveStatus.OK_WITH_WARNING,
+        "exit1_zero_warning_counter_not_success")
+
+    r := Classify7zResult("test", 1, "Everything is Ok`nprefix WARNINGS: suffix`n")
+    AssertTrue(r.status != ArchiveStatus.OK && r.status != ArchiveStatus.OK_WITH_WARNING,
+        "exit1_embedded_WARNINGS_token_not_success")
+
+    ; Exit 1 + hard-error evidence => not warning success
+    r := Classify7zResult("test", 1, "ERROR: CRC Failed`nWarnings: 1`n")
+    AssertEq(r.status, ArchiveStatus.DATA_CORRUPT, "exit1_hard_error_beats_warning")
+    AssertFalse(r.isCleanSuccess, "exit1_hard_error_not_clean")
+
+    r := Classify7zResult("extract", 1, "ERROR: Headers Error`n")
+    AssertEq(r.status, ArchiveStatus.HEADER_CORRUPT, "exit1_header_corrupt_not_warning")
+
+    ; Exit 1 with no recognized warning evidence => failure (not OK / not OK_WITH_WARNING)
+    r := Classify7zResult("extract", 1, "Sub items Errors: 1`n")
+    AssertTrue(r.status != ArchiveStatus.OK && r.status != ArchiveStatus.OK_WITH_WARNING, "exit1_no_warning_evidence_not_success")
+
+    ; Exit 1 never clean OK even if output looks clean
+    r := Classify7zResult("extract", 1, "Everything is Ok`n")
+    AssertTrue(r.status != ArchiveStatus.OK, "exit1_everything_ok_text_not_clean_ok")
+    AssertFalse(r.isCleanSuccess, "exit1_never_clean_success")
+
+    ; Generic CRC / Data Error: DATA_CORRUPT, no retry eligibility
+    r := Classify7zResult("test", 2, "ERROR: CRC Failed`nSub items Errors: 1`n")
+    AssertEq(r.status, ArchiveStatus.DATA_CORRUPT, "generic_crc_still_data_corrupt")
+    AssertFalse(r.encryptionEvidence, "generic_crc_no_encryption_evidence")
+    AssertFalse(r.passwordRetryEligible, "generic_crc_not_retry_eligible")
+
+    r := Classify7zResult("test", 2, "ERROR: Data Error`n")
+    AssertEq(r.status, ArchiveStatus.DATA_CORRUPT, "generic_data_error_still_data_corrupt")
+    AssertFalse(r.passwordRetryEligible, "generic_data_error_not_retry_eligible")
+
+    ; Encrypted file phrase: DATA_CORRUPT + encryptionEvidence + passwordRetryEligible
+    r := Classify7zResult("extract", 2, "ERROR: CRC Failed in encrypted file`nData Error`n")
+    AssertEq(r.status, ArchiveStatus.DATA_CORRUPT, "encrypted_crc_stays_data_corrupt")
+    AssertTrue(r.encryptionEvidence, "encrypted_crc_sets_encryption_evidence")
+    AssertTrue(r.passwordRetryEligible, "encrypted_crc_retry_eligible")
+    AssertFalse(r.isCleanSuccess, "encrypted_crc_not_clean")
+
+    r := Classify7zResult("test", 2, "ERROR: Data Error in encrypted file`n")
+    AssertEq(r.status, ArchiveStatus.DATA_CORRUPT, "encrypted_data_error_stays_data_corrupt")
+    AssertTrue(r.encryptionEvidence, "encrypted_data_error_encryption_evidence")
+    AssertTrue(r.passwordRetryEligible, "encrypted_data_error_retry_eligible")
+
+    ; Wrong password still beats encrypted CRC wording
+    r := Classify7zResult("test", 2, "ERROR: CRC Failed in encrypted file. Wrong password?`n")
+    AssertEq(r.status, ArchiveStatus.WRONG_PASSWORD, "wrong_password_beats_encrypted_crc")
+    AssertFalse(r.passwordRetryEligible, "wrong_password_not_password_retry_eligible_flag")
+
+    ; Probe Encrypted = + keeps NEED_PASSWORD and sets encryptionEvidence
+    r := Classify7zResult("probe", 0, "Type = zip`nPath = payload.txt`nEncrypted = +`n")
+    AssertEq(r.status, ArchiveStatus.NEED_PASSWORD, "probe_encrypted_plus_still_need_password")
+    AssertTrue(r.encryptionEvidence, "probe_encrypted_plus_sets_encryption_evidence")
+
     ; 1) CANCELLED — exit 255
     r := Classify7zResult("extract", 255, "Everything is Ok`n")
     AssertEq(r.status, ArchiveStatus.CANCELLED, "cancelled_exit_255")

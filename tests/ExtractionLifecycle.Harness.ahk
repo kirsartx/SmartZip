@@ -21,7 +21,7 @@ AssertEq(actual, expected, name) {
 AssertTrue(cond, name) => AssertEq(cond ? "1" : "0", "1", name)
 
 ; Pure finalize decision double — mirrors product rules without 7zG / SmartZip instance
-FinalizeDecision(path, result, tempDir, targetDir, mayDeleteSource, tempHasOutput, isNested := false, isVolumeMember := false) {
+FinalizeDecision(path, result, tempDir, targetDir, mayDeleteSource, tempHasOutput, isNested := false, isVolumeMember := false, isolateOk := true) {
     out := {
         status: result.status,
         exitCode: result.exitCode,
@@ -29,10 +29,13 @@ FinalizeDecision(path, result, tempDir, targetDir, mayDeleteSource, tempHasOutpu
         tempAction: "keep",        ; keep | partial | remove_empty
         partialName: "",
         diagnostic: "",
-        isCleanSuccess: (result.status = ArchiveStatus.OK && result.exitCode = 0)
+        isCleanSuccess: (result.status = ArchiveStatus.OK && result.exitCode = 0),
+        outputState: "none",
+        retainedOutputDir: ""
     }
     if (result.status = ArchiveStatus.OK && result.exitCode = 0) {
         out.tempAction := "keep"
+        out.outputState := "usable"
         if (isVolumeMember)
             out.sourceAction := "none"
         else if (isNested && out.isCleanSuccess)
@@ -45,14 +48,23 @@ FinalizeDecision(path, result, tempDir, targetDir, mayDeleteSource, tempHasOutpu
     }
     if (result.status = ArchiveStatus.OK_WITH_WARNING) {
         out.tempAction := "keep"
+        out.outputState := "usable"
         out.sourceAction := "none"  ; always preserve
         out.isCleanSuccess := false
         return out
     }
     ; failure / cancel
     if (tempHasOutput) {
+        if (!isolateOk) {
+            out.tempAction := "keep"
+            out.outputState := "quarantine_failed"
+            out.retainedOutputDir := tempDir
+            out.sourceAction := "none"
+            return out
+        }
         SplitPath(path, , , , &nameNoExt)
         out.tempAction := "partial"
+        out.outputState := "quarantined"
         out.partialName := nameNoExt "_解压不完整_" FormatTime(, "yyyyMMdd-HHmmss")
         raw := "status=" result.status "`nstage=" result.stage "`nexitCode=" result.exitCode
             . "`narchive=" path "`nerrors="
@@ -63,6 +75,7 @@ FinalizeDecision(path, result, tempDir, targetDir, mayDeleteSource, tempHasOutpu
         return out
     }
     out.tempAction := "remove_empty"
+    out.outputState := "none"
     out.sourceAction := "none"
     return out
 }
@@ -73,6 +86,7 @@ d1 := FinalizeDecision("D:\\a\\pack.zip", r1, "D:\\tmp\\t1", "D:\\out", true, tr
 AssertEq(d1.sourceAction, "recycle", "ok_top_maydelete_recycles")
 AssertEq(d1.tempAction, "keep", "ok_keeps_temp_for_move")
 AssertEq(d1.isCleanSuccess, true, "ok_is_clean_success")
+AssertEq(d1.outputState, "usable", "ok_output_state_usable")
 
 ; 2) OK but mayDeleteSource false → preserve source
 d2 := FinalizeDecision("D:\\a\\pack.zip", r1, "D:\\tmp\\t1", "D:\\out", false, true, false, false)
@@ -84,6 +98,7 @@ d3 := FinalizeDecision("D:\\a\\pack.zip", r3, "D:\\tmp\\t1", "D:\\out", true, tr
 AssertEq(d3.sourceAction, "none", "warn_always_preserves_source")
 AssertEq(d3.tempAction, "keep", "warn_moves_usable_output_keep_temp")
 AssertEq(d3.isCleanSuccess, false, "warn_not_clean_success")
+AssertEq(d3.outputState, "usable", "warn_output_state_usable")
 
 ; 4) Executable regression: exit 2, ratio would be >90%, CRC → DATA_CORRUPT, source remains
 ;    (size/ratio must NOT flip this to success)
@@ -96,12 +111,43 @@ AssertEq(d4.sourceAction, "none", "exit2_ratio_ignored_source_remains")
 AssertEq(d4.tempAction, "partial", "exit2_with_output_goes_partial")
 AssertTrue(InStr(d4.partialName, "_解压不完整_") > 0, "exit2_partial_name_has_marker")
 AssertTrue(InStr(d4.diagnostic, "DATA_CORRUPT") > 0 || InStr(d4.diagnostic, "status=") > 0, "exit2_diagnostic_written_concept")
+AssertEq(d4.outputState, "quarantined", "exit2_output_state_quarantined")
+
+dQf := FinalizeDecision("D:\\a\\pack.zip", r4, "D:\\tmp\\stuck", "D:\\out", true, true, false, false, false)
+AssertEq(dQf.outputState, "quarantine_failed", "isolate_fail_output_state_quarantine_failed")
+AssertEq(dQf.retainedOutputDir, "D:\\tmp\\stuck", "isolate_fail_retained_temp")
+AssertEq(dQf.sourceAction, "none", "isolate_fail_preserves_source")
+AssertEq(dQf.tempAction, "keep", "isolate_fail_keeps_temp_not_promoted_by_finalize")
+AssertEq(dQf.partialName, "", "isolate_fail_does_not_expose_or_pollute_unverified_candidate")
+
+ClassifyGuiExtractForOracle(extractExit, testOutput) {
+    if (extractExit = 255)
+        return ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255)
+    detail := Classify7zResult("extract", extractExit, testOutput)
+    if (extractExit != 1)
+        return detail
+    if (detail.status != ArchiveStatus.OK && detail.status != ArchiveStatus.OK_WITH_WARNING)
+        return detail
+    result := ArchiveResult(ArchiveStatus.UNKNOWN_ERROR, "extract", 1)
+    result.isCleanSuccess := false
+    result.mayDeleteSource := false
+    return result
+}
+
+oe1 := ClassifyGuiExtractForOracle(1, "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n")
+AssertTrue(oe1.status != ArchiveStatus.OK && oe1.status != ArchiveStatus.OK_WITH_WARNING, "gui_exit1_not_borrow_test_warning_success")
+AssertEq(oe1.isCleanSuccess, false, "gui_exit1_not_clean")
+oe0 := ClassifyGuiExtractForOracle(0, "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n")
+AssertEq(oe0.status, ArchiveStatus.OK_WITH_WARNING, "gui_exit0_test_warning_ok_with_warning")
+oe2 := ClassifyGuiExtractForOracle(2, "ERROR: CRC Failed`n")
+AssertEq(oe2.status, ArchiveStatus.DATA_CORRUPT, "gui_exit2_crc_still_data_corrupt")
 
 ; 5) Failure empty temp → remove empty only
 r5 := ArchiveResult(ArchiveStatus.HEADER_CORRUPT, "extract", 2, "D:\\a\\bad.zip")
 d5 := FinalizeDecision("D:\\a\\bad.zip", r5, "D:\\tmp\\empty", "D:\\out", true, false, false, false)
 AssertEq(d5.tempAction, "remove_empty", "fail_empty_removes_temp_only")
 AssertEq(d5.sourceAction, "none", "fail_empty_preserves_source")
+AssertEq(d5.outputState, "none", "fail_empty_output_state_none")
 
 ; 6) CANCELLED never source-handles
 r6 := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, "D:\\a\\pack.zip")

@@ -35,6 +35,10 @@ class ArchiveResult {
         this.isCleanSuccess := (status = ArchiveStatus.OK)
         this.mayDeleteSource := (status = ArchiveStatus.OK)
         this.output := output
+        this.outputState := "none"
+        this.passwordRetryEligible := false
+        this.encryptionEvidence := false
+        this.retainedOutputDir := ""
     }
 }
 
@@ -87,6 +91,7 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
         ; Content-encrypted readable header: probe list shows item Encrypted = + (exit often 0)
         if (stage = "probe" && trimmed ~= "i)^Encrypted\s*=\s*\+") {
             hasNeedPassword := true
+            result.encryptionEvidence := true
         }
         if (trimmed ~= "i)Unsupported Method" || trimmed ~= "i)Unsupported method" || trimmed ~= "i)Method is not supported") {
             hasUnsupported := true
@@ -104,6 +109,9 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
             hasDataCorrupt := true
             isErr := true
         }
+        if (trimmed ~= "i)in encrypted file") {
+            result.encryptionEvidence := true
+        }
         ; 7-Zip classic: "Cannot open the file as archive"
         ; 7-Zip ZS: "Cannot open the file as [7z] archive" / "Is not archive" / "Can't open as archive"
         if (InStr(trimmed, "Cannot open the file as archive") || InStr(trimmed, "Can not open the file as archive")
@@ -116,7 +124,7 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
             hasIoError := true
             isErr := true
         }
-        if (trimmed ~= "i)^Warnings?:\s*[1-9]" || InStr(trimmed, "There are data after the end of archive") || InStr(trimmed, "WARNINGS:")) {
+        if (trimmed ~= "i)^Warnings?:\s*[1-9]" || InStr(trimmed, "There are data after the end of archive") || trimmed == "WARNINGS:") {
             hasWarning := true
             isWarn := true
         }
@@ -155,6 +163,13 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
         result.status := ArchiveStatus.OK_WITH_WARNING
     } else if (exitCode = 0) {
         result.status := ArchiveStatus.OK
+    } else if (exitCode = 1 && (hasWarning || result.warningLines.Length > 0)
+        && !hasMissingVolume && !hasNeedPassword && !hasWrongPassword
+        && !hasUnsupported && !hasTruncated && !hasHeaderCorrupt
+        && !hasDataCorrupt && !hasNotArchive && !hasIoError
+        && result.errorLines.Length = 0) {
+        ; Exit 1 warning success only with recognized warning evidence and no hard-error evidence
+        result.status := ArchiveStatus.OK_WITH_WARNING
     } else if (hasIoError) {
         result.status := ArchiveStatus.IO_ERROR
     } else {
@@ -164,6 +179,10 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
     result.isCleanSuccess := (result.status = ArchiveStatus.OK)
     result.mayDeleteSource := (result.status = ArchiveStatus.OK)
     result.passwordUsed := ""
+    if (result.status = ArchiveStatus.DATA_CORRUPT && result.encryptionEvidence)
+        result.passwordRetryEligible := true
+    else
+        result.passwordRetryEligible := false
     return result
 }
 

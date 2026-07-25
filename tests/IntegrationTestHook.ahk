@@ -39,6 +39,12 @@ SmartZipTest_OnResult(result) {
     partial := ""
     if result.HasOwnProp("partialOutputDir")
         partial := result.partialOutputDir
+    outputState := "none"
+    if result.HasOwnProp("outputState")
+        outputState := result.outputState
+    retained := ""
+    if result.HasOwnProp("retainedOutputDir")
+        retained := result.retainedOutputDir
     archivePath := result.archivePath
     SplitPath(archivePath, &baseName)
 
@@ -73,8 +79,10 @@ SmartZipTest_OnResult(result) {
         . '"exitCode":' exitCode ','
         . '"isCleanSuccess":' isClean ','
         . '"mayDeleteSource":' mayDelete ','
+        . '"outputState":"' esc(outputState) '",'
         . '"archiveBaseName":"' esc(baseName) '",'
         . '"partialOutputDir":"' esc(partial) '",'
+        . '"retainedOutputDir":"' esc(retained) '",'
         . '"warning":"' esc(warnJoined) '",'
         . '"error":"' esc(errJoined) '",'
         . '"output":"' esc(SubStr(redOutput, 1, 2048)) '"'

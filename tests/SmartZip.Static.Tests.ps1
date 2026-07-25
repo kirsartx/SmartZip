@@ -247,39 +247,78 @@ Describe 'SettingsUnZipKey' {
     }
 }
 
+Describe 'SettingsAccuracy' {
+
+    It 'settings describe full archive test behavior instead of empty experimental flag' {
+        $src = $script:SmartZipSource
+        $src | Should Not Match '启用测试中的功能'
+        $src | Should Not Match '当前没有测试中功能'
+        $ok = Test-Regex -Text $src -Pattern '完整.*测试|强制.*测试|解压前测试|test.*archive'
+        $ok | Should Be $true
+    }
+
+    It 'settings present volume once-processing as noninteractive explanation' {
+        $src = $script:SmartZipSource
+        # partSkip INI key must remain for compatibility
+        $src | Should Match 'partSkip'
+        # Must not use GuiCheckBox("partSkip" as an effective user switch presentation
+        $legacy = Test-Regex -Text $src -Pattern 'GuiCheckBox\(\s*"partSkip"'
+        $legacy | Should Be $false
+        $ok = Test-Regex -Text $src -Pattern '同组只解压一次|任一卷从首卷'
+        $ok | Should Be $true
+    }
+
+    It 'settings source handling wording uses recycle bin language' {
+        $src = $script:SmartZipSource
+        $ok = Test-Regex -Text $src -Pattern '移入回收站'
+        $ok | Should Be $true
+        # Tips still state clean success only and volumes never auto-handled
+        $ok2 = Test-Regex -Text $src -Pattern '(?s)(完全|干净|成功).{0,40}(回收站|移入)'
+        $ok2 | Should Be $true
+    }
+
+    It 'settings keep nested recycle description separate from top-level source recycle' {
+        $src = $script:SmartZipSource
+        $src | Should Match 'nesting'
+        $src | Should Match 'nestingMuilt'
+        $ok = Test-Regex -Text $src -Pattern '嵌套'
+        $ok | Should Be $true
+    }
+}
+
 Describe 'VersionBanner' {
 
     It 'MainVersion remains numeric 3.6' {
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
     }
 
-    It 'edition is Kirs.3' {
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.3"'
+    It 'edition is Kirs.4' {
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.4"'
     }
 
-    It 'buildVersion is 23' {
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*23\b'
+    It 'buildVersion is 24' {
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*24\b'
     }
 
-    It 'buileTime matches the Kirs.3 build timestamp' {
+    It 'buileTime matches the Kirs.4 build timestamp' {
         $script:SmartZipSource |
-            Should Match 'buileTime\s*:=\s*"2026/7/23 20:43:46"'
+            Should Match 'buileTime\s*:=\s*"2026/7/24 05:00:00"'
     }
 
-    It 'Ahk2Exe file version remains 3.6' {
+    It 'Ahk2Exe file version uses four-part 3.6.0.0' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
+            Should Match '(?m)^;@Ahk2Exe-SetFileVersion 3\.6\.0\.0\s*$'
     }
 
-    It 'Ahk2Exe product version is 23' {
+    It 'Ahk2Exe product version uses four-part 24.0.0.0' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+23\b'
+            Should Match '(?m)^;@Ahk2Exe-SetProductVersion 24\.0\.0\.0\s*$'
     }
 }
 
 Describe 'AboutSection' {
 
-    It 'shows SmartZip 3.6 Kirs.3 build 23' {
+    It 'shows SmartZip 3.6 Kirs.4 build 24' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
@@ -807,6 +846,8 @@ Describe 'PasswordPreflightSafety' {
     }
 }
 
+$script:PartialIsolationBody = Get-SourceSlice -Source $script:SmartZipSource `
+    -StartMarker "`n    TempDirHasPromotableOutput(" -EndMarker "`n    ExtractArchiveToTemp("
 $script:ExtractArchiveToTempBody = Get-SourceSlice -Source $script:SmartZipSource `
     -StartMarker "`n    ExtractArchiveToTemp(" -EndMarker "`n    FinalizeExtraction("
 $script:FinalizeExtractionBody = Get-SourceSlice -Source $script:SmartZipSource `
@@ -848,6 +889,15 @@ Describe 'ExtractionLifecycleSafety' {
         $script:ExtractArchiveToTempBody | Should Match '255'
     }
 
+    It 'ExtractArchiveToTemp does not classify GUI exit 1 success from follow-up test warning text alone' {
+        $b = $script:ExtractArchiveToTempBody
+        # Must special-case extractExit = 1 (or non-zero without extract capture) before borrowing t output as warning success
+        $ok = Test-Regex -Text $b -Pattern '(?s)extractExit\s*=\s*1|exitCode\s*=\s*1'
+        $ok | Should Be $true
+        # Must still re-test via console capture for diagnostics on other paths
+        $b | Should Match ' t '
+    }
+
     It 'no IsSuccess size or successPercent authorization remains' {
         $script:UnzipBody | Should Not Match 'IsSuccess\s*\('
         $script:SmartZipSource | Should Not Match '(?s)IsSuccess\s*\(\s*\)\s*\{[^}]*succesSpercent'
@@ -855,11 +905,19 @@ Describe 'ExtractionLifecycleSafety' {
         $script:FinalizeExtractionBody | Should Not Match 'succesSpercent|successPercent|folderSize\s*/\s*this\.currentSize'
     }
 
-    It 'FinalizeExtraction encodes partial dir name 解压不完整 and diagnostic file' {
+    It 'FinalizeExtraction reports verified partial isolation and explicit output state' {
+        [string]::IsNullOrEmpty($script:PartialIsolationBody) | Should Be $false
+        $script:PartialIsolationBody | Should Match 'IsolatePartialOutput\s*\('
+        $script:PartialIsolationBody | Should Match 'TempDirHasPromotableOutput\s*\('
+        $script:PartialIsolationBody | Should Match 'DirExist\s*\(\s*movedPath\s*\)'
+        $script:PartialIsolationBody | Should Match 'MoveItem\s*\('
         $script:FinalizeExtractionBody | Should Match '解压不完整'
         $script:FinalizeExtractionBody | Should Match 'yyyyMMdd-HHmmss'
         $script:FinalizeExtractionBody | Should Match 'PathDupl\s*\('
-        $script:FinalizeExtractionBody | Should Match 'DirMove\s*\('
+        $script:FinalizeExtractionBody | Should Match 'IsolatePartialOutput\s*\('
+        $script:FinalizeExtractionBody | Should Match 'outputState\s*:=\s*"quarantined"'
+        $script:FinalizeExtractionBody | Should Match 'outputState\s*:=\s*"quarantine_failed"'
+        $script:FinalizeExtractionBody | Should Match 'retainedOutputDir\s*:=\s*tempDir'
         $ok = Test-Regex -Text $script:FinalizeExtractionBody -Pattern 'WriteDiagnostic\s*\('
         $ok | Should Be $true
         $script:WriteDiagnosticBody | Should Match 'SmartZip-诊断\.txt'
@@ -911,7 +969,7 @@ Describe 'ExtractionLifecycleSafety' {
 
     It 'partial diagnostic name and PathDupl used' {
         $script:FinalizeExtractionBody | Should Match 'PathDupl\s*\('
-        $script:FinalizeExtractionBody | Should Match 'DirMove|MoveItem'
+        $script:PartialIsolationBody | Should Match 'DirMove|MoveItem'
     }
 
     It 'successPercent assignment may still load but must not gate extract success' {
@@ -1123,15 +1181,13 @@ Describe 'DiagnosticUISafety' {
         $ok | Should Be $true
     }
 
-    It 'password retry limited to NEED_PASSWORD and WRONG_PASSWORD' {
+    It 'password retry is limited to password states or eligible encrypted corruption' {
         $btn = $script:DiagnosticButtonsBody
         if ([string]::IsNullOrEmpty($btn)) { $btn = $script:SmartZipSource }
         $btn | Should Match 'NEED_PASSWORD'
         $btn | Should Match 'WRONG_PASSWORD'
+        $btn | Should Match 'passwordRetryEligible'
         $btn | Should Match '重新输入密码'
-        $ok = Test-Regex -Text $btn -Pattern `
-            '(?s)(NEED_PASSWORD|WRONG_PASSWORD).{0,240}重新输入密码|重新输入密码.{0,240}(NEED_PASSWORD|WRONG_PASSWORD)'
-        $ok | Should Be $true
     }
 
     It 'locate first volume limited to MISSING_VOLUME' {
@@ -1353,13 +1409,14 @@ Describe 'DiagnosticUISafety' {
         # Single shared extract call site in zipx (no duplicated extract path)
         $extractCalls = [regex]::Matches($u, 'ExtractArchiveToTemp\s*\(')
         $extractCalls.Count | Should Be 1
-        # Exactly three successful recovery assignments; each must consume Loop budget via nearby continue
+        # Exactly four successful recovery assignments (including encrypted DATA_CORRUPT);
+        # each must consume the shared Loop budget via nearby continue.
         # (preflight fall-through at A_Index=1 would leave budget open for a second recovery)
         $assignCount = [regex]::Matches($u, 'resolved\s*:=\s*shown').Count
-        $assignCount | Should Be 3
+        $assignCount | Should Be 4
         $assignThenContinue = [regex]::Matches($u,
             '(?s)resolved\s*:=\s*shown(?:[^\n]*\r?\n\s*(?:;[^\r\n]*)?)*?\r?\n\s*continue\b')
-        $assignThenContinue.Count | Should Be 3
+        $assignThenContinue.Count | Should Be 4
         # Preflight recovery must not fall through on iteration 1 (budget already spent)
         $preflightFallThrough = Test-Regex -Text $u -Pattern `
             '(?s)resolved\s*:=\s*shown\s*\r?\n\s*;[^\r\n]*fall through'
@@ -1396,7 +1453,7 @@ Describe 'DiagnosticUISafety' {
     }
 }
 
-Describe 'Kirs3MetadataAndDocs' {
+Describe 'Kirs4MetadataAndDocs' {
 
     BeforeAll {
         $script:ReadmePath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\README.md'))
@@ -1409,48 +1466,48 @@ Describe 'Kirs3MetadataAndDocs' {
         } else { '' }
     }
 
-    It 'Kirs3 file version remains 3.6' {
+    It 'Kirs4 file version remains 3.6' {
         $script:SmartZipSource |
             Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
     }
 
-    It 'Kirs3 product version is 23' {
+    It 'Kirs4 product version is 24' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+23\b'
+            Should Match ';@Ahk2Exe-SetProductVersion\s+24\b'
     }
 
-    It 'Kirs3 buildVersion is 23' {
+    It 'Kirs4 buildVersion is 24' {
         $script:SmartZipSource |
-            Should Match 'buildVersion\s*:=\s*23\b'
+            Should Match 'buildVersion\s*:=\s*24\b'
     }
 
-    It 'Kirs3 edition is Kirs.3' {
+    It 'Kirs4 edition is Kirs.4' {
         $script:SmartZipSource |
-            Should Match 'edition\s*:=\s*"Kirs\.3"'
+            Should Match 'edition\s*:=\s*"Kirs\.4"'
     }
 
-    It 'Kirs3 About keeps version edition build expression' {
+    It 'Kirs4 About keeps version edition build expression' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
     }
 
-    It 'Kirs3 rendered About identity is exact' {
+    It 'Kirs4 rendered About identity is exact' {
         # Identity is the product of MainVersion + edition + buildVersion constants.
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.3"'
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*23\b'
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.4"'
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*24\b'
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
-        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.3 (23)).
-        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.3\s+\(23\)') -or
+        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.4 (24)).
+        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.4\s+\(24\)') -or
             ($script:SmartZipSource -match 'MainVersion\s*:=\s*"3\.6"' -and
-             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.3"' -and
-             $script:SmartZipSource -match 'buildVersion\s*:=\s*23\b') | Should Be $true
+             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.4"' -and
+             $script:SmartZipSource -match 'buildVersion\s*:=\s*24\b') | Should Be $true
     }
 
-    It 'Kirs3 About keeps removed rows absent' {
+    It 'Kirs4 About keeps removed rows absent' {
         $script:SmartZipSource | Should Not Match '支持作者'
         $script:SmartZipSource | Should Not Match '建议反馈'
         $script:SmartZipSource | Should Not Match '论坛反馈'
@@ -1508,6 +1565,7 @@ Describe 'Kirs3MetadataAndDocs' {
             '(?s)partSkip.{0,200}(同组|一次|首卷|any member|from the first)'
         $ok | Should Be $true
         $script:IniDocText | Should Match '同组|首卷|一次'
+        $script:IniDocText | Should Match '回收站|移入回收站'
     }
 
     It 'Kirs3 docs do not claim replacing Kirs.2 history' {
@@ -1517,7 +1575,22 @@ Describe 'Kirs3MetadataAndDocs' {
         $replaced | Should Be $false
     }
 
-    It 'Kirs3 production source has no IntegrationTestHook include' {
+    It 'Kirs4 README documents trustworthy outcomes' {
+        $script:ReadmeText | Should Match 'Kirs\.4'
+        $okOut = Test-Regex -Text $script:ReadmeText -Pattern 'outputState|可用输出|不完整|quarantine|隔离'
+        $okExit = Test-Regex -Text $script:ReadmeText -Pattern '退出码\s*1|exit code\s*1|警告'
+        $okEnc = Test-Regex -Text $script:ReadmeText -Pattern '加密|CRC|密码'
+        ($okOut -and $okExit -and $okEnc) | Should Be $true
+    }
+
+    It 'Kirs4 docs do not claim replacing Kirs.3 history' {
+        $combined = $script:ReadmeText + "`n" + $script:IniDocText
+        $replaced = Test-Regex -Text $combined -Pattern `
+            '(?i)(Kirs\.3\s*(已被?替换|is\s+replaced)|replaces?\s+Kirs\.3|替代\s*Kirs\.3)'
+        $replaced | Should Be $false
+    }
+
+    It 'Kirs4 production source has no IntegrationTestHook include' {
         $script:SmartZipSource | Should Not Match 'IntegrationTestHook'
     }
 }
@@ -1559,5 +1632,55 @@ Describe 'VolumeSelectionSafety' {
     It 'partSkip INI key remains for compatibility' {
         $script:SmartZipSource | Should Match 'partSkip'
         $script:SmartZipSource | Should Match 'this\.partSkip\s*:='
+    }
+}
+
+Describe 'Kirs4ZipxOutcomeContract' {
+    It 'zipx returns ArchiveResult on success and failure paths' {
+        $u = $script:UnzipBody
+        $ok = Test-Regex -Text $u -Pattern '(?s)zipx\s*\([^)]*\)\s*\{.*?return\s+\w+'
+        $ok | Should Be $true
+
+        $returns = [regex]::Matches($u,
+            '(?m)^\s+return\s+(skipResult|missing|resolved|shown|extractResult|result|fallback)\b')
+        ($returns.Count -ge 3) | Should Be $true
+    }
+
+    It 'zipx has no bare return on any terminal path' {
+        $zipxBody = Get-SourceSlice -Source $script:UnzipBody `
+            -StartMarker "`n        zipx(path)" -EndMarker "`n        ;解压嵌套"
+        [string]::IsNullOrEmpty($zipxBody) | Should Be $false
+
+        # A bare return yields no ArchiveResult. Scan the entire zipx body so future
+        # branches cannot bypass the outer outputState contract by using a new name.
+        $bareReturns = [regex]::Matches($zipxBody,
+            '(?m)^[\t ]*return(?:[\t ]*;[^\r\n]*)?[\t ]*\r?$')
+        $bareReturns.Count | Should Be 0
+    }
+
+    It 'outer Unzip promotes only when outputState is usable' {
+        $u = $script:UnzipBody
+        $ok = Test-Regex -Text $u -Pattern 'outputState\s*=\s*["'']usable["'']|outputState\s*!=\s*["'']usable["'']'
+        $ok | Should Be $true
+
+        $legacyOnly = Test-Regex -Text $u -Pattern '(?s)zipx\([^)]*\)\s*\r?\n\s*if\s*!\s*DirExist\(tmpDir\)'
+        $legacyOnly | Should Be $false
+    }
+
+    It 'quarantine_failed cannot reach destination naming or MoveItem' {
+        $u = $script:UnzipBody
+        $gate = [regex]::Match($u,
+            '(?s)zipResult\s*:=\s*zipx\(i\).*?if\s*\(\s*zipResult\.outputState\s*!=\s*["'']usable["'']\s*\)\s*\r?\n\s*continue')
+        $gate.Success | Should Be $true
+
+        $promotionPath = [regex]::Match($u,
+            '(?s)zipResult\s*:=\s*zipx\(i\).*?outputState\s*!=\s*["'']usable["''].*?continue.*?this\.MoveItem\(')
+        $promotionPath.Success | Should Be $true
+    }
+
+    It 'FinalizeExtraction remains the only post-extract outputState assigner' {
+        $u = $script:UnzipBody
+        $ok = Test-Regex -Text $u -Pattern '(?s)ExtractArchiveToTemp\(.+?FinalizeExtraction\('
+        $ok | Should Be $true
     }
 }

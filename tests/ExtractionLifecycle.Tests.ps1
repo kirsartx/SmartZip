@@ -41,14 +41,20 @@ function New-ExtractionLifecycleProductHost {
         throw "SmartZip.ahk not found: $SmartZipPath"
     }
     $src = Get-SmartZipSourceText $SmartZipPath
-    $startMarker = "`n    ExtractArchiveToTemp("
+    $startMarker = "`n    TempDirHasPromotableOutput("
     $endMarker = "`n    RunCmdCapture("
     $body = Get-SourceSlice -Source $src -StartMarker $startMarker -EndMarker $endMarker
     if ([string]::IsNullOrEmpty($body)) {
-        throw "lifecycle methods not found in SmartZip.ahk (ExtractArchiveToTemp..RunCmdCapture)"
+        throw "lifecycle methods not found in SmartZip.ahk (TempDirHasPromotableOutput..RunCmdCapture)"
     }
     $method = $body.TrimStart("`r", "`n")
-    foreach ($name in @('ExtractArchiveToTemp', 'FinalizeExtraction', 'WriteDiagnostic')) {
+    foreach ($name in @(
+            'TempDirHasPromotableOutput',
+            'IsolatePartialOutput',
+            'ExtractArchiveToTemp',
+            'FinalizeExtraction',
+            'WriteDiagnostic'
+        )) {
         # Count method definitions only (4-space class indent), not call sites inside other methods.
         $matches = [regex]::Matches($method, '(?m)^    ' + [regex]::Escape($name) + '\s*\(')
         if ($matches.Count -ne 1) {
@@ -111,6 +117,9 @@ class LifecycleHost {
     pathDuplCalls := []
     dirMoves := []
     scriptedExit := 0
+    precreatePartialCandidate := false
+    forceMoveFailure := false
+    precreatedPartialCandidate := ""
     scriptedCap := { exitCode: 2, output: "ERROR: CRC Failed in encrypted file`nData Error", cancelled: false }
     workRoot := ""
 
@@ -120,6 +129,9 @@ class LifecycleHost {
         this.dirMoves := []
         this.exitCode := 0
         this.scriptedExit := 0
+        this.precreatePartialCandidate := false
+        this.forceMoveFailure := false
+        this.precreatedPartialCandidate := ""
     }
 
     SeedFile(path, content := "x") {
@@ -153,11 +165,17 @@ class LifecycleHost {
 
     PathDupl(path, isdir := 0) {
         this.pathDuplCalls.Push(path)
+        if this.precreatePartialCandidate {
+            try DirCreate(path)
+            this.precreatedPartialCandidate := path
+        }
         return path
     }
 
     MoveItem(souce, dest, isdir, lineNum) {
         this.dirMoves.Push({ from: souce, to: dest })
+        if this.forceMoveFailure
+            throw Error("forced partial isolation failure")
         try DirMove(souce, dest)
         catch {
             try FileMove(souce, dest, 1)
@@ -236,6 +254,8 @@ RunFinalizeCase(host, path, result, tempDir, targetDir, mayDeleteRequested, temp
         sourceAction: SourceActionFrom(host, path, isNested),
         tempAction: TempActionFrom(host, fr, tempDir),
         isCleanSuccess: fr.isCleanSuccess,
+        outputState: fr.outputState,
+        retainedOutputDir: fr.retainedOutputDir,
         partialName: "",
         diagnostic: ""
     }
@@ -259,6 +279,7 @@ d1 := RunFinalizeCase(host, p1, r1, t1, o1, true, true, false, false)
 AssertEq(d1.sourceAction, "recycle", "ok_top_maydelete_recycles")
 AssertEq(d1.tempAction, "keep", "ok_keeps_temp_for_move")
 AssertEq(d1.isCleanSuccess, true, "ok_is_clean_success")
+AssertEq(d1.outputState, "usable", "ok_output_state_usable")
 
 d2 := RunFinalizeCase(host, p1, r1, t1, o1, false, true, false, false)
 AssertEq(d2.sourceAction, "none", "ok_without_maydelete_preserves")
@@ -268,6 +289,7 @@ d3 := RunFinalizeCase(host, p1, r3, t1, o1, true, true, false, false)
 AssertEq(d3.sourceAction, "none", "warn_always_preserves_source")
 AssertEq(d3.tempAction, "keep", "warn_moves_usable_output_keep_temp")
 AssertEq(d3.isCleanSuccess, false, "warn_not_clean_success")
+AssertEq(d3.outputState, "usable", "warn_output_state_usable")
 
 host.Reset()
 host.scriptedExit := 2
@@ -287,12 +309,82 @@ AssertEq(d4.sourceAction, "none", "exit2_ratio_ignored_source_remains")
 AssertEq(d4.tempAction, "partial", "exit2_with_output_goes_partial")
 AssertTrue(InStr(d4.partialName, "_解压不完整_") > 0, "exit2_partial_name_has_marker")
 AssertTrue(InStr(d4.diagnostic, "DATA_CORRUPT") > 0 || InStr(d4.diagnostic, "status=") > 0, "exit2_diagnostic_written_concept")
+AssertEq(d4.outputState, "quarantined", "exit2_output_state_quarantined")
+
+; Kirs.4: GUI extract exit 1 must not become OK_WITH_WARNING from a later 7z t warning-only capture
+host.Reset()
+host.scriptedExit := 1
+host.scriptedCap := { exitCode: 0, output: "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n", cancelled: false }
+e1path := host.workRoot "\a\warnish.7z"
+e1tmp := host.workRoot "\tmp\e1"
+try DirCreate(host.workRoot "\a")
+if !FileExist(e1path)
+    FileAppend("w", e1path, "UTF-8")
+try DirCreate(e1tmp)
+host.SeedFile(e1tmp "\partial.bin", "x")
+erE1 := host.ExtractArchiveToTemp(e1path, "", e1tmp)
+AssertTrue(erE1.status != ArchiveStatus.OK && erE1.status != ArchiveStatus.OK_WITH_WARNING, "gui_exit1_not_borrow_test_warning_success")
+AssertEq(erE1.isCleanSuccess, false, "gui_exit1_not_clean")
+
+; Exit 0 extract + t warning text may still be OK_WITH_WARNING
+host.Reset()
+host.scriptedExit := 0
+host.scriptedCap := { exitCode: 0, output: "Everything is Ok`nWarnings: 1`nThere are data after the end of archive`n", cancelled: false }
+e0path := host.workRoot "\a\trail.7z"
+e0tmp := host.workRoot "\tmp\e0"
+if !FileExist(e0path)
+    FileAppend("t", e0path, "UTF-8")
+try DirCreate(e0tmp)
+host.SeedFile(e0tmp "\ok.bin", "x")
+erE0 := host.ExtractArchiveToTemp(e0path, "", e0tmp)
+AssertEq(erE0.status, ArchiveStatus.OK_WITH_WARNING, "gui_exit0_test_warning_ok_with_warning")
+AssertEq(erE0.isCleanSuccess, false, "gui_exit0_warning_not_clean")
+
+; Exit 2 + t CRC still DATA_CORRUPT (existing path remains)
+host.Reset()
+host.scriptedExit := 2
+host.scriptedCap := { exitCode: 2, output: "ERROR: CRC Failed`n", cancelled: false }
+e2path := host.workRoot "\a\badcrc.7z"
+e2tmp := host.workRoot "\tmp\e2"
+if !FileExist(e2path)
+    FileAppend("b", e2path, "UTF-8")
+try DirCreate(e2tmp)
+erE2 := host.ExtractArchiveToTemp(e2path, "", e2tmp)
+AssertEq(erE2.status, ArchiveStatus.DATA_CORRUPT, "gui_exit2_crc_still_data_corrupt")
 
 r5 := ArchiveResult(ArchiveStatus.HEADER_CORRUPT, "extract", 2, host.workRoot "\a\bad.zip")
 emptyTmp := host.workRoot "\tmp\empty"
 d5 := RunFinalizeCase(host, host.workRoot "\a\bad.zip", r5, emptyTmp, o1, true, false, false, false)
 AssertEq(d5.tempAction, "remove_empty", "fail_empty_removes_temp_only")
 AssertEq(d5.sourceAction, "none", "fail_empty_preserves_source")
+AssertEq(d5.outputState, "none", "fail_empty_output_state_none")
+
+; Force real isolation failure: targetDir is a file, so neither DirMove nor MoveItem
+; can create a child incomplete directory beneath it.
+blockedTarget := host.workRoot "\blocked-target"
+try FileDelete(blockedTarget)
+try DirDelete(blockedTarget, 1)
+FileAppend("not-a-directory", blockedTarget, "UTF-8")
+rFail := ArchiveResult(ArchiveStatus.DATA_CORRUPT, "extract", 2, p1)
+rFail.output := "ERROR: CRC Failed`n"
+stuck := host.workRoot "\tmp\stuck"
+dStuck := RunFinalizeCase(host, p1, rFail, stuck, blockedTarget, true, true, false, false)
+AssertEq(dStuck.outputState, "quarantine_failed", "isolate_fail_output_state_quarantine_failed")
+AssertTrue(dStuck.retainedOutputDir != "", "isolate_fail_retained_temp")
+AssertEq(dStuck.sourceAction, "none", "isolate_fail_preserves_source")
+AssertEq(dStuck.tempAction, "keep", "isolate_fail_keeps_temp_not_promoted_by_finalize")
+
+; Candidate partial directories may already exist for unrelated work.  A failed
+; isolation must not expose that directory or write this extraction's diagnostic there.
+host.Reset()
+host.precreatePartialCandidate := true
+host.forceMoveFailure := true
+candidateTmp := host.workRoot "\tmp\candidate-stuck"
+dCandidate := RunFinalizeCase(host, p1, rFail, candidateTmp, o1, true, true, false, false)
+candidateDiag := host.precreatedPartialCandidate "\SmartZip-诊断.txt"
+AssertTrue(dCandidate.partialName = "" && !FileExist(candidateDiag), "isolate_fail_does_not_expose_or_pollute_unverified_candidate")
+host.precreatePartialCandidate := false
+host.forceMoveFailure := false
 
 r6 := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, p1)
 cTmp := host.workRoot "\tmp\c"
@@ -354,11 +446,11 @@ ExitApp(failCount > 0 ? 1 : 0)
 function Export-ExtractionLifecycleProductHarness {
     # Required implementation contract (no oracle fallback):
     # 1. Read SmartZip.ahk and extract the exact class-method region from
-    #    "`n    ExtractArchiveToTemp(" through the line before "`n    RunCmdCapture(".
-    # 2. Assert that ExtractArchiveToTemp, FinalizeExtraction, and WriteDiagnostic
-    #    each occur exactly once in the slice.
+    #    "`n    TempDirHasPromotableOutput(" through the line before "`n    RunCmdCapture(".
+    # 2. Assert that the isolation helpers, ExtractArchiveToTemp, FinalizeExtraction,
+    #    and WriteDiagnostic each occur exactly once in the slice.
     # 3. Generate a TEMP AHK host with only production methods + injectable doubles.
-    # 4. Emit the same 25 named PASS/FAIL keys as the oracle by invoking those
+    # 4. Emit the same 39 named PASS/FAIL keys as the oracle by invoking those
     #    production methods; never call/copy FinalizeDecision.
     # 5. Return the generated absolute .ahk path; throw on any missing marker/key.
     $productHarness = New-ExtractionLifecycleProductHost `
@@ -445,6 +537,10 @@ Describe 'ExtractionLifecycleBehavior' {
         'exit2_with_output_goes_partial',
         'exit2_partial_name_has_marker',
         'exit2_diagnostic_written_concept',
+        'gui_exit1_not_borrow_test_warning_success',
+        'gui_exit1_not_clean',
+        'gui_exit0_test_warning_ok_with_warning',
+        'gui_exit2_crc_still_data_corrupt',
         'fail_empty_removes_temp_only',
         'fail_empty_preserves_source',
         'cancel_never_source_handle',
@@ -456,7 +552,16 @@ Describe 'ExtractionLifecycleBehavior' {
         'nonzero_exit_not_clean_even_if_ok_status',
         'nonzero_exit_no_recycle',
         'partial_uses_basename',
-        'partial_name_not_full_path'
+        'partial_name_not_full_path',
+        'ok_output_state_usable',
+        'warn_output_state_usable',
+        'exit2_output_state_quarantined',
+        'fail_empty_output_state_none',
+        'isolate_fail_output_state_quarantine_failed',
+        'isolate_fail_retained_temp',
+        'isolate_fail_preserves_source',
+        'isolate_fail_keeps_temp_not_promoted_by_finalize',
+        'isolate_fail_does_not_expose_or_pollute_unverified_candidate'
     )
 
     foreach ($name in $cases) {

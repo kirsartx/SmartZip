@@ -27,7 +27,13 @@ $script:CaseKeys = @(
     'recovery_retry_wrong_keeps_window',
     'recovery_retry_cancel_keeps_window',
     'recovery_batch_password_never_opens_gui',
-    'recovery_boundfunc_click_arity_retry_password'
+    'recovery_boundfunc_click_arity_retry_password',
+    'button_retry_password_eligible_data_corrupt',
+    'button_no_retry_generic_data_corrupt',
+    'reason_data_corrupt_eligible_ambiguous',
+    'recovery_eligible_data_corrupt_success_closes',
+    'recovery_batch_eligible_never_opens_gui',
+    'batch_summary_marks_encrypted_crc_as_password_check_or_damage'
 )
 
 $script:ReasonTable = [ordered]@{
@@ -323,6 +329,12 @@ MakeResult(status, archivePath := "D:\\data\\folder\\pack.7z", extra := "") {
             r.batchBucket := m6[1]
         if RegExMatch(extra, '"passwordUsed"\s*:\s*"([^"]*)"', &m7)
             r.passwordUsed := m7[1]
+        if JsonGetBool(extra, "passwordRetryEligible", false)
+            r.passwordRetryEligible := true
+        if JsonGetBool(extra, "encryptionEvidence", false)
+            r.encryptionEvidence := true
+        if RegExMatch(extra, '"retainedOutputDir"\s*:\s*"([^"]*)"', &m8)
+            r.retainedOutputDir := JsonUnescape(m8[1])
         if InStr(extra, '"warningLines"')
             r.warningLines.Push("There are data after the end of archive")
         if InStr(extra, '"errorLines"')
@@ -373,7 +385,7 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
 
     if (cmd = "reason") {
         status := JsonGet(jsonText, "status", "OK")
-        r := MakeResult(status)
+        r := MakeResult(status, "D:\\data\\folder\\pack.7z", jsonText)
         reason := host.DiagnosticReason(r)
         rec := host.DiagnosticRecommendation(r)
         return '{"key":"' caseKey '","status":"' status '","reason":"' EscapeJson(reason) '","recommendation":"' EscapeJson(rec) '"}'
@@ -445,8 +457,13 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
             }
         }
         pw := JsonGet(jsonText, "passwordUsed", "")
-        for p in paths {
+        eligibleBatchFailure := JsonGetBool(jsonText, "passwordRetryEligible", false)
+        for index, p in paths {
             r := MakeResult(ArchiveStatus.DATA_CORRUPT, p)
+            if (eligibleBatchFailure && index = 1) {
+                r.passwordRetryEligible := true
+                r.encryptionEvidence := true
+            }
             if (pw != "")
                 r.passwordUsed := JsonUnescape(pw)
             host.ShowDiagnostic(r, true)
@@ -643,7 +660,8 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
         host.passwordRetryValue := JsonGet(jsonText, "retryPassword", "GoodPass")
         r := MakeResult(status, arch, jsonText)
         ; Headless path: product ShowDiagnostic builds recovery on lastRecovery (no WinWaitClose).
-        returned := host.ShowDiagnostic(r, false)
+        isBatch := JsonGetBool(jsonText, "isBatch", false)
+        returned := host.ShowDiagnostic(r, isBatch)
         closed := false
         if (JsonGetBool(jsonText, "clickRetry", false)) {
             if !host.HasOwnProp("lastRecovery") || host.lastRecovery = ""
@@ -849,6 +867,30 @@ Describe 'DiagnosticUI' {
         (Test-JsonHasButton $out '复制脱敏诊断信息') | Should Be $true
         (Test-JsonHasButton $out '关闭') | Should Be $true
         (Get-JsonField $out 'showGui') | Should Be 'true'
+    }
+
+    It 'button_retry_password_eligible_data_corrupt' {
+        $out = Invoke-DiagnosticUICase -Command 'buttons' -CaseKey 'button_retry_password_eligible_data_corrupt' `
+            -Json '{"status":"DATA_CORRUPT","passwordRetryEligible":true,"encryptionEvidence":true}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        ($j.buttons -join '|') | Should Match '重新输入密码'
+    }
+
+    It 'button_no_retry_generic_data_corrupt' {
+        $out = Invoke-DiagnosticUICase -Command 'buttons' -CaseKey 'button_no_retry_generic_data_corrupt' `
+            -Json '{"status":"DATA_CORRUPT","passwordRetryEligible":false}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        ($j.buttons -join '|') | Should Not Match '重新输入密码'
+    }
+
+    It 'reason_data_corrupt_eligible_ambiguous' {
+        $out = Invoke-DiagnosticUICase -Command 'reason' -CaseKey 'reason_data_corrupt_eligible_ambiguous' `
+            -Json '{"status":"DATA_CORRUPT","passwordRetryEligible":true}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.reason | Should Match '密码'
+        $j.reason | Should Match '损坏'
+        $j.recommendation | Should Match '密码'
+        $j.recommendation | Should Match '损坏|重新'
     }
 
     It 'button_locate_first' {
@@ -1094,6 +1136,29 @@ Describe 'DiagnosticUI' {
             -Json '{"callSummary":true}' -StageDir $script:StageDir
         $j = $out | ConvertFrom-Json
         $j.guiCalls | Should Be 0
+    }
+    It 'recovery_eligible_data_corrupt_success_closes' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_eligible_data_corrupt_success_closes' `
+            -Json '{"status":"DATA_CORRUPT","passwordRetryEligible":true,"retryMode":"success","clickRetry":true}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.returnStatus | Should Be 'OK'
+        $j.closed | Should Be $true
+    }
+    It 'recovery_batch_eligible_never_opens_gui' {
+        $out = Invoke-DiagnosticUICase -Command 'recovery' -CaseKey 'recovery_batch_eligible_never_opens_gui' `
+            -Json '{"status":"DATA_CORRUPT","passwordRetryEligible":true,"isBatch":true}' -StageDir $script:StageDir
+        $j = $out | ConvertFrom-Json
+        $j.guiCalls | Should Be 0
+    }
+    It 'batch_summary_marks_encrypted_crc_as_password_check_or_damage' {
+        $out = Invoke-DiagnosticUICase -Command 'batch_failures' `
+            -CaseKey 'batch_summary_marks_encrypted_crc_as_password_check_or_damage' `
+            -Json '{"paths":["D:\\x\\encrypted.7z"],"passwordRetryEligible":true}' `
+            -StageDir $script:StageDir
+        $summary = Get-JsonField $out 'summaryText'
+        $summary | Should Match '密码'
+        $summary | Should Match '损坏'
+        (Get-JsonField $out 'guiCalls') | Should Be '0'
     }
     It 'recovery_boundfunc_click_arity_retry_password' {
         # Same production bind shape; Click event adds (GuiCtrl, Info). Must not too-many-params;

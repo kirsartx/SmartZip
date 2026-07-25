@@ -3,7 +3,7 @@
 .SYNOPSIS
   Real 7-Zip + compiled SmartZip integration suite — TEMP hook injection only.
 .NOTES
-  Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs3-<guid>.
+  Pester 3.4 classic syntax. TEMP root only: %TEMP%\SmartZip-Kirs4-<guid>.
   Never reads/writes C:\Tool\SmartZip. Passwords stay process-env only.
   Engine: hard-coded C:\Tool\7-Zip-Zstandard\7z.exe (user engine directory).
 #>
@@ -132,7 +132,7 @@ Describe 'Real7Zip Integration' {
             $script:SkipReason = "scenario runner missing"
         }
 
-        $script:TempRoot = Join-Path $env:TEMP ('SmartZip-Kirs3-' + [guid]::NewGuid().ToString('N'))
+        $script:TempRoot = Join-Path $env:TEMP ('SmartZip-Kirs4-' + [guid]::NewGuid().ToString('N'))
         Assert-NoDeployedSmartZipAccess $script:TempRoot
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
@@ -521,6 +521,45 @@ Describe 'Real7Zip Integration' {
         $isFalse = ($mds -eq $false) -or ("$mds" -eq 'false') -or ("$mds" -eq '0')
         $isFalse | Should Be $true
         Assert-SourcePreserved $run
+    }
+
+    # ---- 4 extraction outcome-state assertions ----
+
+    It 'valid fixture reports usable outputState' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'valid' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'usable'
+        $run.Result.status | Should Be 'OK'
+    }
+
+    It 'trailingWarning fixture reports usable not clean' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'trailingWarning' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'usable'
+        $run.Result.isCleanSuccess | Should Be $false
+        Assert-SourcePreserved $run
+    }
+
+    It 'crcPartial fixture reports quarantined and not normal target' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'crcPartial' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'quarantined'
+        $run.Result.status | Should Be 'DATA_CORRUPT'
+        $run.PartialDirs.Count | Should Be 1
+        $bad = @($run.TargetInventory | Where-Object {
+            $_ -notmatch '_解压不完整_' -and
+            ($_ -match 'alpha\.txt$' -or $_ -match 'beta\.txt$' -or
+             $_ -match 'alpha\.bin$' -or $_ -match 'beta\.bin$')
+        })
+        $bad.Count | Should Be 0
+    }
+
+    It 'missing volume reports none and no promotion' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'kirs4-output' -Scenario 'splitMissing' -DelSource 0 -PasswordMode 'none'
+        $run.Result.outputState | Should Be 'none'
+        $run.Result.status | Should Be 'MISSING_VOLUME'
+        Assert-AllVolumeMembersPresent -Run $run -FixtureKey 'splitMissing'
     }
 
     # ---- 2 secrecy assertions ----

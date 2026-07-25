@@ -4,14 +4,14 @@
 ;@Ahk2Exe-SetCompanyName  viv
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
-;@Ahk2Exe-SetFileVersion 3.6
-;@Ahk2Exe-SetProductVersion 23
+;@Ahk2Exe-SetFileVersion 3.6.0.0
+;@Ahk2Exe-SetProductVersion 24.0.0.0
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 23
+buildVersion := 24
 MainVersion := "3.6"
-edition := "Kirs.3"
+edition := "Kirs.4"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/23 20:43:46"
+buileTime := "2026/7/24 05:00:00"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
@@ -289,11 +289,12 @@ class SmartZip
 
             if this.addDir2Pass
                 SplitPath(i, , &dir), this.password.Push(RegExReplace(dir, ".+\\"))
-            zipx(i)
+            zipResult := zipx(i)
             if this.addDir2Pass
                 this.password.RemoveAt(this.password.Length)
 
-            if !DirExist(tmpDir)	;密码错误以及未输入正确密码
+            ; Kirs.4: only finalized usable output may be promoted into the destination.
+            if (zipResult.outputState != "usable")
                 continue
 
             loop files tmpDir "\*.*", "RDF"
@@ -396,14 +397,14 @@ class SmartZip
                     skipResult := ArchiveResult(ArchiveStatus.OK, "probe", 0, path)
                     skipResult.batchBucket := "skipped"
                     this.ShowDiagnostic(skipResult, isBatch)
-                    return
+                    return skipResult
                 }
                 if (volume.missingVolumes.Length || !FileExist(volume.firstPath)) {
                     missing := ArchiveResult(ArchiveStatus.MISSING_VOLUME, "probe", 2, path)
                     missing.volumeFirst := volume.firstPath
                     missing.missingVolumes := volume.missingVolumes
                     this.ShowDiagnostic(missing, isBatch)
-                    return
+                    return missing
                 }
                 this.processedVolumeFirst[key] := true
                 path := volume.firstPath
@@ -427,14 +428,15 @@ class SmartZip
                         this.exitCode := 255
                     shown := this.ShowDiagnostic(resolved, isBatch)
                     if (!isBatch
-                        && (resolved.status = ArchiveStatus.NEED_PASSWORD || resolved.status = ArchiveStatus.WRONG_PASSWORD)
+                        && (resolved.status = ArchiveStatus.NEED_PASSWORD
+                            || resolved.status = ArchiveStatus.WRONG_PASSWORD
+                            || resolved.passwordRetryEligible)
                         && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
                         && A_Index = 1) {
                         resolved := shown
                         continue  ; consume shared recovery budget; iteration 2 recomputes flags + pipeline
-                    } else {
-                        return
                     }
+                    return shown
                 }
 
                 this.error := false
@@ -451,6 +453,18 @@ class SmartZip
                         mayHandleSource := false
                         nestedMayRecycle := false
                     } else if (tr.status = ArchiveStatus.DATA_CORRUPT) {
+                        if (probe.encryptionEvidence) {
+                            tr.encryptionEvidence := true
+                            tr.passwordRetryEligible := true
+                        }
+                        if (!isBatch && tr.passwordRetryEligible && A_Index = 1) {
+                            shown := this.ShowDiagnostic(tr, isBatch, true)
+                            if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
+                                resolved := shown
+                                continue
+                            }
+                            return shown
+                        }
                         ; Still extract so FinalizeExtraction can isolate salvageable partial output.
                         this.error := true
                         mayHandleSource := false
@@ -462,13 +476,15 @@ class SmartZip
                         ; Budget available only on first shared-pipeline attempt
                         shown := this.ShowDiagnostic(tr, isBatch, A_Index = 1)
                         if (!isBatch
-                            && (tr.status = ArchiveStatus.NEED_PASSWORD || tr.status = ArchiveStatus.WRONG_PASSWORD)
+                            && (tr.status = ArchiveStatus.NEED_PASSWORD
+                                || tr.status = ArchiveStatus.WRONG_PASSWORD
+                                || tr.passwordRetryEligible)
                             && (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING)
                             && A_Index = 1) {
                             resolved := shown
                             continue  ; resume shared pipeline once with new password
                         }
-                        return
+                        return shown
                     }
                 }
 
@@ -477,6 +493,11 @@ class SmartZip
                     this.RecycleItem(tmpDir, A_LineNumber, true)
 
                 extractResult := this.ExtractArchiveToTemp(path, resolved.passwordUsed, tmpDir)
+
+                if (extractResult.status = ArchiveStatus.DATA_CORRUPT && probe.encryptionEvidence) {
+                    extractResult.encryptionEvidence := true
+                    extractResult.passwordRetryEligible := true
+                }
 
                 ; mayDeleteSource: all required stages OK only (probe/test already OK; extract must be OK)
                 mayDel := false
@@ -497,7 +518,9 @@ class SmartZip
                     this.RecycleItem(path, A_LineNumber, false)
 
                 if (!isBatch
-                    && (extractResult.status = ArchiveStatus.NEED_PASSWORD || extractResult.status = ArchiveStatus.WRONG_PASSWORD)
+                    && (extractResult.status = ArchiveStatus.NEED_PASSWORD
+                        || extractResult.status = ArchiveStatus.WRONG_PASSWORD
+                        || extractResult.passwordRetryEligible)
                     && A_Index = 1) {
                     shown := this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
                     if (shown.status = ArchiveStatus.OK || shown.status = ArchiveStatus.OK_WITH_WARNING) {
@@ -505,13 +528,16 @@ class SmartZip
                         ; temp already finalized away (moved/deleted); resume once
                         continue
                     }
-                    return
+                    return shown
                 }
 
                 ; Iteration 2 password failures: informative only (no discarded-success retry)
                 this.ShowDiagnostic(extractResult, isBatch, A_Index = 1)
-                break
+                return extractResult
             }
+
+            fallback := ArchiveResult(ArchiveStatus.UNKNOWN_ERROR, "extract", -1, path)
+            return fallback
         }
 
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
@@ -1320,36 +1346,79 @@ class SmartZip
 
     ResolveArchivePassword(path, probeResult) {
         st := probeResult.status
-        if (st != ArchiveStatus.NEED_PASSWORD && st != ArchiveStatus.WRONG_PASSWORD)
+        eligible := (st = ArchiveStatus.NEED_PASSWORD || st = ArchiveStatus.WRONG_PASSWORD
+            || (probeResult.HasOwnProp("passwordRetryEligible") && probeResult.passwordRetryEligible))
+        if !eligible
             return probeResult
 
+        recoveryEncryptionEvidence := (probeResult.HasOwnProp("encryptionEvidence")
+                && probeResult.encryptionEvidence)
+            || (probeResult.HasOwnProp("passwordRetryEligible")
+                && probeResult.passwordRetryEligible)
+        lastEligibleCorrupt := ""
+
         emptyTry := this.TestArchive(path, "")
+        if (emptyTry.status = ArchiveStatus.DATA_CORRUPT && recoveryEncryptionEvidence) {
+            emptyTry.encryptionEvidence := true
+            emptyTry.passwordRetryEligible := true
+            lastEligibleCorrupt := emptyTry
+        }
         if (emptyTry.status = ArchiveStatus.OK || emptyTry.status = ArchiveStatus.OK_WITH_WARNING)
             return emptyTry
-        if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD)
+        if (emptyTry.status != ArchiveStatus.NEED_PASSWORD && emptyTry.status != ArchiveStatus.WRONG_PASSWORD
+            && !(emptyTry.HasOwnProp("passwordRetryEligible") && emptyTry.passwordRetryEligible)
+            && emptyTry.status != ArchiveStatus.DATA_CORRUPT)
             return emptyTry
 
+        last := emptyTry
         for pwd in this.BuildPasswordCandidates(path) {
             r := this.TestArchive(path, pwd)
+            last := r
+            if (r.status = ArchiveStatus.DATA_CORRUPT && recoveryEncryptionEvidence) {
+                r.encryptionEvidence := true
+                r.passwordRetryEligible := true
+                lastEligibleCorrupt := r
+            }
             if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING)
                 return r
             if (r.status = ArchiveStatus.CANCELLED)
                 return r
-            if (r.status != ArchiveStatus.NEED_PASSWORD && r.status != ArchiveStatus.WRONG_PASSWORD)
+            if (r.status != ArchiveStatus.NEED_PASSWORD && r.status != ArchiveStatus.WRONG_PASSWORD
+                && !(r.HasOwnProp("passwordRetryEligible") && r.passwordRetryEligible)
+                && r.status != ArchiveStatus.DATA_CORRUPT)
                 return r	; non-password status: stop iterating
         }
 
+        ; Batch / multi-select: never interactive password UI
+        if (this.HasOwnProp("muilt") && this.muilt) {
+            if IsObject(lastEligibleCorrupt)
+                return lastEligibleCorrupt
+            return last
+        }
+
         dlg := this.ShowPasswordDialog(path)
-        if (dlg.action = "cancel" || dlg.password = "")
+        if (dlg.action = "cancel" || dlg.password = "") {
+            if IsObject(lastEligibleCorrupt)
+                return lastEligibleCorrupt
+            if (probeResult.passwordRetryEligible)
+                return probeResult  ; keep DATA_CORRUPT ambiguity; do not relabel cancel
             return ArchiveResult(ArchiveStatus.CANCELLED, "password", -1, path, "")
+        }
 
         r := this.TestArchive(path, dlg.password)
+        if (r.status = ArchiveStatus.DATA_CORRUPT && recoveryEncryptionEvidence) {
+            r.encryptionEvidence := true
+            r.passwordRetryEligible := true
+            lastEligibleCorrupt := r
+        }
         if (r.status = ArchiveStatus.OK || r.status = ArchiveStatus.OK_WITH_WARNING) {
             if (dlg.action = "save")
                 this.RememberPassword(dlg.password)
             ; "本次使用" does not persist
             return r
         }
+        if (r.status = ArchiveStatus.DATA_CORRUPT && r.passwordRetryEligible)
+            return r
         if (r.status = ArchiveStatus.NEED_PASSWORD || r.status = ArchiveStatus.WRONG_PASSWORD)
             return r  ; submitted-but-wrong stays diagnosable; only explicit cancel is CANCELLED
         return r
@@ -1401,6 +1470,28 @@ class SmartZip
 
     GetClipboardText() => this.HasOwnProp("clipText") ? this.clipText : A_Clipboard
 
+    TempDirHasPromotableOutput(tempDir) {
+        if !DirExist(tempDir)
+            return false
+        loop files tempDir "\*.*", "DF"
+            return true
+        return false
+    }
+
+    IsolatePartialOutput(tempDir, partialPath) {
+        movedPath := partialPath
+        try DirMove(tempDir, partialPath)
+        catch {
+            try movedPath := this.MoveItem(tempDir, partialPath, 1, A_LineNumber)
+            catch
+                return ""
+        }
+        if (StrLower(movedPath) = StrLower(tempDir))
+            return ""
+        return (DirExist(movedPath) && !this.TempDirHasPromotableOutput(tempDir))
+            ? movedPath : ""
+    }
+
     ExtractArchiveToTemp(path, password, tempDir) {
         pass := ""
         if (password != "")
@@ -1418,14 +1509,42 @@ class SmartZip
         if (extractExit = 255) {
             result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, path)
         } else {
-            ; Always re-test with capture: 7-Zip ZS may return exit 0 with trailing-data
-            ; WARNINGS, and non-zero exits need full output for DATA_CORRUPT / etc.
+            ; Follow-up console test is a different process. Use its text for hard-error detail
+            ; and for exit-0 warning detection, but never promote GUI exit 1 to OK_WITH_WARNING
+            ; solely because the later test printed warning evidence.
             cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
             cap := this.RunCmdCapture(cmd, "UTF-8")
             if this.cmdLog
                 this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
-            result := Classify7zResult("extract", extractExit, cap.output, path)
-            result.exitCode := extractExit
+            if (extractExit = 1) {
+                ; No GUI extract stdout capture available: exit 1 remains failure.
+                ; Classify with empty extract text first so t-warning text cannot invent success.
+                result := Classify7zResult("extract", extractExit, "", path)
+                detail := Classify7zResult("extract", extractExit, cap.output, path)
+                if (detail.status != ArchiveStatus.OK && detail.status != ArchiveStatus.OK_WITH_WARNING) {
+                    result := detail
+                    result.exitCode := extractExit
+                } else {
+                    result.exitCode := extractExit
+                    if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+                        result.status := ArchiveStatus.UNKNOWN_ERROR
+                    result.isCleanSuccess := false
+                    result.mayDeleteSource := false
+                    result.passwordRetryEligible := false
+                }
+                ; Carry encryption / hard-error detail flags when detail is a real failure
+                if (detail.encryptionEvidence)
+                    result.encryptionEvidence := true
+                if (detail.status = ArchiveStatus.DATA_CORRUPT && result.encryptionEvidence)
+                    result.passwordRetryEligible := true
+                if (detail.errorLines.Length) {
+                    result.errorLines := detail.errorLines
+                    result.output := detail.output
+                }
+            } else {
+                result := Classify7zResult("extract", extractExit, cap.output, path)
+                result.exitCode := extractExit
+            }
         }
         result.tempOutputDir := tempDir
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
@@ -1436,27 +1555,24 @@ class SmartZip
     }
 
     FinalizeExtraction(path, result, tempDir, targetDir, mayDeleteSource) {
-        ; Clean success requires both OK status and extract exit 0 (never size ratio).
         result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
         result.mayDeleteSource := result.isCleanSuccess && mayDeleteSource
+        ; Default remains construction "none" until this method assigns post-extract state
+        if !result.HasOwnProp("outputState") || result.outputState = ""
+            result.outputState := "none"
+        result.retainedOutputDir := ""
 
-        tempHasOutput := false
-        if DirExist(tempDir) {
-            loop files tempDir "\*.*", "DF" {
-                tempHasOutput := true
-                break
-            }
-        }
+        tempHasOutput := this.TempDirHasPromotableOutput(tempDir)
 
         if (result.status = ArchiveStatus.OK && result.exitCode = 0) {
-            ; keep tempDir for existing post-zipx MoveItem / AfterUnzip
+            result.outputState := "usable"
             if (mayDeleteSource && result.isCleanSuccess)
-                this.RecycleItem(path, A_LineNumber)  ; Recycle Bin only (delete=false)
+                this.RecycleItem(path, A_LineNumber)  ; Recycle Bin only
             return result
         }
 
         if (result.status = ArchiveStatus.OK_WITH_WARNING) {
-            ; usable output stays in tempDir for movers; never source-handle
+            result.outputState := "usable"
             return result
         }
 
@@ -1464,17 +1580,24 @@ class SmartZip
             SplitPath(path, , , , &nameNoExt)
             stamp := FormatTime(, "yyyyMMdd-HHmmss")
             partial := this.PathDupl(targetDir "\" nameNoExt "_解压不完整_" stamp, 1)
-            try DirMove(tempDir, partial)
-            catch {
-                try this.MoveItem(tempDir, partial, 1, A_LineNumber)
+            isolatedPath := this.IsolatePartialOutput(tempDir, partial)
+            if (isolatedPath != "") {
+                result.outputState := "quarantined"
+                result.partialOutputDir := isolatedPath
+                result.retainedOutputDir := ""
+                this.WriteDiagnostic(result)
+                return result
             }
-            result.partialOutputDir := partial
+            result.outputState := "quarantine_failed"
+            result.partialOutputDir := ""
+            result.retainedOutputDir := tempDir
             this.WriteDiagnostic(result)
             return result
         }
 
         if DirExist(tempDir)
             this.RecycleItem(tempDir, A_LineNumber, true)
+        result.outputState := "none"
         return result
     }
 
@@ -1557,6 +1680,8 @@ class SmartZip
             case ArchiveStatus.TRUNCATED:
                 return "压缩包数据被截断。"
             case ArchiveStatus.DATA_CORRUPT:
+                if (result.HasOwnProp("passwordRetryEligible") && result.passwordRetryEligible)
+                    return "CRC 或数据校验失败；密码可能不正确，或加密数据已损坏。"
                 return "CRC 或数据校验失败。"
             case ArchiveStatus.CANCELLED:
                 return "操作已取消。"
@@ -1588,6 +1713,8 @@ class SmartZip
             case ArchiveStatus.TRUNCATED:
                 return "请重新下载或复制完整文件后再试。"
             case ArchiveStatus.DATA_CORRUPT:
+                if (result.HasOwnProp("passwordRetryEligible") && result.passwordRetryEligible)
+                    return "可重新输入密码重试；若仍失败，请保留源包并检查“不完整”目录中的可用文件。"
                 return "请检查“不完整”目录中的可用文件，并重新获取源包。"
             case ArchiveStatus.CANCELLED:
                 return "无需操作。"
@@ -1604,8 +1731,13 @@ class SmartZip
             return buttons
         if (result.partialOutputDir != "" && DirExist(result.partialOutputDir))
             buttons.Push("打开部分文件目录")
+        else if (result.HasOwnProp("retainedOutputDir") && result.retainedOutputDir != ""
+            && DirExist(result.retainedOutputDir))
+            buttons.Push("打开部分文件目录")
+        passwordRetryEligible := result.HasOwnProp("passwordRetryEligible") && result.passwordRetryEligible
         if (allowPasswordRetry
-            && (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD))
+            && (result.status = ArchiveStatus.NEED_PASSWORD || result.status = ArchiveStatus.WRONG_PASSWORD
+                || passwordRetryEligible))
             buttons.Push("重新输入密码")
         if (result.status = ArchiveStatus.MISSING_VOLUME)
             buttons.Push("定位首卷")
@@ -1731,6 +1863,15 @@ class SmartZip
             if (fc > 3)
                 msg .= " ... (+" (fc - 3) ")"
         }
+        needsPasswordCheck := false
+        for failed in b.failure {
+            if (failed.passwordRetryEligible) {
+                needsPasswordCheck := true
+                break
+            }
+        }
+        if needsPasswordCheck
+            msg .= "`n提示: 部分加密文件需要检查密码，也可能已损坏。"
         return msg
     }
 
@@ -1789,6 +1930,9 @@ class SmartZip
         archiveName := result.archivePath
         SplitPath(result.archivePath, &archiveName)
         partialPath := result.partialOutputDir
+        if (partialPath = "" && result.outputState = "quarantine_failed"
+            && result.retainedOutputDir != "")
+            partialPath := result.retainedOutputDir
         recovery := { original: result, resolved: "" }
 
         if IsSet(SmartZipTest_SuppressGui) && SmartZipTest_SuppressGui {
@@ -2148,10 +2292,10 @@ Setting()
     pwdList.OnEvent("Change",(ctrl,info)=> ctrl.ToolTip := passwordMap.Has(ctrl.Text) ? "当前密码使用次数 : " passwordMap[ctrl.Text] : "密码列表")
 
     lineGeneration("xs")
-    GuiCheckBox("nesting", ini.nesting, "解压嵌套压缩包", "解压成功删除源文件,只针对单文件")
-    GuiCheckBox("nestingMuilt", ini.nestingMuilt, "解压嵌套文件夹", "只检查第一层文件夹,解压成功删除源文件", "x+170 yp")
-    GuiCheckBox("delSource", ini.delSource, "解压后删除源文件", "仅在解压成功时删除")
-    GuiCheckBox("delWhenHasPass", ini.delWhenHasPass, "仅删除包含密码的源文件", "不需要选中 解压后删除源文件", "yp x+90")
+    GuiCheckBox("nesting", ini.nesting, "解压嵌套压缩包", "嵌套源包仅在完全干净成功后移入回收站，且仅针对单文件")
+    GuiCheckBox("nestingMuilt", ini.nestingMuilt, "解压嵌套文件夹", "只检查第一层文件夹；嵌套源包仅在完全干净成功后移入回收站", "x+170 yp")
+    GuiCheckBox("delSource", ini.delSource, "解压后将源文件移入回收站", "仅在完全干净成功（无警告）时处理；警告与失败均保留源包；分卷永不自动处理")
+    GuiCheckBox("delWhenHasPass", ini.delWhenHasPass, "仅将含密码的源文件移入回收站", "不需要选中上方源文件选项；同样仅完全干净成功时生效", "yp x+90")
 
     GuiCheckBox("autoAddPass", ini.autoAddPass, "自动添加密码", "在7-Zip输入密码框选中显示密码保存")
     GuiCheckBox("dynamicPassSort", ini.dynamicPassSort, "密码动态排序", "把使用次数最多的排在前面")
@@ -2174,8 +2318,10 @@ Setting()
 
     Tab.UseTab(3)
     lineGeneration()
-    GuiCheckBox("partSkip", ini.partSkip, "分卷同组只解压一次", "任一卷从首卷开始；同组多选只解压一次`n分卷不会自动删除", "Section")
-    GuiCheckBox("test", ini.test, "启用测试中的功能", "当前没有测试中功能")
+    set.AddText("Section w420", "分卷：同组只解压一次（从首卷开始）。此项为说明，不是可关闭开关。兼容保留 ini 键 partSkip。")
+    ; Keep runtime default behavior: Unzip still reads this.partSkip := ini.partSkip for compatibility
+    ; but does not use it as an early-continue switch (Kirs.3 already removed that).
+    GuiCheckBox("test", ini.test, "解压前完整测试压缩包", "启用后始终先完整测试；即使关闭，源文件处理与嵌套回收仍会强制完整测试")
     GuiCheckBox("cmdLog", ini.cmdLog, "启用测试日志", "检查文件时的测试日志,与下文的日志等级无关")
     lineGeneration("xs")
     GuiUpDownEdit("logLevel", "日志等级", ini.logLevel, 5, "关闭0/删除1/重命名2/命令行错误3/命令行正确4/其他5")
