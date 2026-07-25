@@ -605,7 +605,13 @@ class SmartZip
                 isRead := true
             }
 
-            if (isDir := DirExist(path)) && this.fileSystemObject.GetFolder(path).Size = 0	;空文件夹
+            isDir := DirExist(path)
+            folderEmpty := true
+            if isDir {
+                loop files path "\*.*", "DF"
+                    folderEmpty := false
+            }
+            if isDir && folderEmpty	;空文件夹
                 return this.RecycleItem(path, A_LineNumber)
 
             SplitPath(path, &name, &dir, &ext, &nameNoExt)
