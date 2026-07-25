@@ -675,10 +675,10 @@ class SmartZip
 
             for i in this.dynamicPassArr
             {
-                if ini.Read("A_Index", , "passwordSort") != i[2]
+                if ini.Read(A_Index, , "passwordSort") != i[2]
                     ini.Write(i[2], A_Index, "passwordSort")
 
-                if ini.Read("A_Index", , "password") != i[1]
+                if ini.Read(A_Index, , "password") != i[1]
                     ini.Write(i[1], A_Index, "password")
             }
 
@@ -702,7 +702,7 @@ class SmartZip
         PasswordClear(index, delete := false)
         {
             if delete
-                IniDelete(ini, "password", index), IniDelete(ini, "passwordSort", index)
+                ini.Delete("password", index), ini.Delete("passwordSort", index)
             else
                 ini.Write(, index, "password"), ini.Write(, index, "passwordSort")
         }
