@@ -1686,6 +1686,10 @@ class SmartZip
             case ArchiveStatus.MISSING_VOLUME:
                 return "分卷不完整，或未从首卷开始。"
             case ArchiveStatus.NOT_ARCHIVE:
+                extReason := ""
+                try SplitPath(result.archivePath, , , &extReason)
+                if (extReason != "" && this.IsArchive(extReason))
+                    return "压缩包文件头可能已损坏或不完整。"
                 return "文件不是可识别的压缩包。"
             case ArchiveStatus.UNSUPPORTED_METHOD:
                 return "当前 7-Zip 不支持此压缩方法。"
@@ -1719,6 +1723,10 @@ class SmartZip
             case ArchiveStatus.MISSING_VOLUME:
                 return "请补齐全部分卷并从首卷重新解压。"
             case ArchiveStatus.NOT_ARCHIVE:
+                extRec := ""
+                try SplitPath(result.archivePath, , , &extRec)
+                if (extRec != "" && this.IsArchive(extRec))
+                    return "请重新下载或复制完整源文件，或用 7-Zip 打开检查。"
                 return "请确认文件类型或使用 7-Zip 打开检查。"
             case ArchiveStatus.UNSUPPORTED_METHOD:
                 return "请更新 7-Zip，或使用创建该压缩包的工具。"
