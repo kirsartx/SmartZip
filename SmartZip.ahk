@@ -55,8 +55,13 @@ class SmartZip
         try {
             cap := this.RunCmdCapture('"' this.7z '"', "UTF-8")
             if (cap.output != "") {
-                firstLine := StrSplit(cap.output, "`n", "`r")[1]
-                this.sevenZipVersion := Trim(firstLine)
+                for line in StrSplit(cap.output, "`n", "`r") {
+                    line := Trim(line)
+                    if (line != "" && InStr(line, "7-Zip")) {
+                        this.sevenZipVersion := line
+                        break
+                    }
+                }
             }
         }
 
