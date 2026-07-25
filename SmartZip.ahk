@@ -650,25 +650,6 @@ class SmartZip
                 this.MoveItem(path, dir "\" name, isDir, A_LineNumber)
         }
 
-        IsPart(path)
-        {
-            SplitPath(path, &name)
-
-            if name ~= "i)\.part\d\.rar$"
-            {
-                if InStr(name, ".part1.rar")	;第一卷
-                    return 1
-                this.Loging("可能是分卷包  <--> " path, A_LineNumber, 5)
-                return 0
-            } else if name ~= "\..+\.\d+$"
-            {
-                if name ~= "\..+.0+1"	;第一卷
-                    return 1
-                this.Loging("可能是分卷包  <--> " path, A_LineNumber, 5)
-                return 0
-            }
-            return -1
-        }
 
         PasswordSort()
         {
@@ -2370,6 +2351,8 @@ Setting()
     lineGeneration("xs")
     if FileExist(A_ScriptDir "\cmdLog.txt")
         set.AddButton(, "查看测试日志").OnEvent("Click", (*) => Run(A_ScriptDir "\cmdLog.txt"))
+    if FileExist(A_ScriptDir "\SmartZip-diagnostics.log")
+        set.AddButton("xs", "查看诊断日志").OnEvent("Click", (*) => Run(A_ScriptDir "\SmartZip-diagnostics.log"))
     lineGeneration("xs")
     set.AddButton("yp x400", "更多设置").OnEvent("Click", (*) => Run(A_ScriptDir "\SmartZip.ini"))
 
