@@ -273,7 +273,7 @@ class SmartZip
                 }
             }
 
-            this.fileSystemObject := ComObject("Scripting.FileSystemObject")
+            ; fileSystemObject removed in Kirs.5: GetFolder().Size replaced with native loop
 
         } else
         {
