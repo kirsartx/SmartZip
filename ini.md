@@ -37,6 +37,7 @@
 | successMinSize  | set | 2.12(10) | 10 `KB` | 判断是否解压成功 | `源大小 < 10kb` (可测试压缩只有一个链接的txt比较大小)
 | logLevel  | set | 2.0(0) | 5 | 操作日志等级 0-5 | 依次为 禁用日志,删除,重命名,命令行错误,命令行正确,其他
 | cmdLog  | set | 2.11(9) | 0 | 启用测试日志 | 启用可在当前目录查看 __SmartZipCmdLog.txt
+| openOutputDir  | set | Kirs.5 | 0 | 解压后打开输出目录 | 1=成功解压后自动打开资源管理器
 | icon  | set | 2.0(0) | %SmartZipDir%\ico.ico | 右键菜单,托盘,界面的图标 | 为空时其为 7-zip 的图标
 | 1,2,3...  | password | 2.0(0) | 密码... | 如源有密码遍历密码,成功解压 | 按顺序遍历(把常用的添加在前面)
 | openZipName  | menu | 2.0(0) | 用7-Zip打开 | `o`右键菜单名称
