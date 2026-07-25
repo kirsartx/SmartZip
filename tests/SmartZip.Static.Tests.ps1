@@ -292,17 +292,17 @@ Describe 'VersionBanner' {
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
     }
 
-    It 'edition is Kirs.4' {
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.4"'
+    It 'edition is Kirs.5' {
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.5"'
     }
 
-    It 'buildVersion is 24' {
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*24\b'
+    It 'buildVersion is 25' {
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*25\b'
     }
 
-    It 'buileTime matches the Kirs.4 build timestamp' {
+    It 'buileTime matches the Kirs.5 build timestamp' {
         $script:SmartZipSource |
-            Should Match 'buileTime\s*:=\s*"2026/7/24 05:00:00"'
+            Should Match 'buileTime\s*:=\s*"2026/7/25 09:00:00"'
     }
 
     It 'Ahk2Exe file version uses four-part 3.6.0.0' {
@@ -310,15 +310,15 @@ Describe 'VersionBanner' {
             Should Match '(?m)^;@Ahk2Exe-SetFileVersion 3\.6\.0\.0\s*$'
     }
 
-    It 'Ahk2Exe product version uses four-part 24.0.0.0' {
+    It 'Ahk2Exe product version uses four-part 25.0.0.0' {
         $script:SmartZipSource |
-            Should Match '(?m)^;@Ahk2Exe-SetProductVersion 24\.0\.0\.0\s*$'
+            Should Match '(?m)^;@Ahk2Exe-SetProductVersion 25.0.0.0\s*$'
     }
 }
 
 Describe 'AboutSection' {
 
-    It 'shows SmartZip 3.6 Kirs.4 build 24' {
+    It 'shows SmartZip 3.6 Kirs.5 build 25' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
@@ -1471,43 +1471,43 @@ Describe 'Kirs4MetadataAndDocs' {
             Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
     }
 
-    It 'Kirs4 product version is 24' {
+    It 'Kirs5 product version is 25' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+24\b'
+            Should Match ';@Ahk2Exe-SetProductVersion\s+25\b'
     }
 
-    It 'Kirs4 buildVersion is 24' {
+    It 'Kirs5 buildVersion is 25' {
         $script:SmartZipSource |
-            Should Match 'buildVersion\s*:=\s*24\b'
+            Should Match 'buildVersion\s*:=\s*25\b'
     }
 
-    It 'Kirs4 edition is Kirs.4' {
+    It 'Kirs5 edition is Kirs.5' {
         $script:SmartZipSource |
-            Should Match 'edition\s*:=\s*"Kirs\.4"'
+            Should Match 'edition\s*:=\s*"Kirs\.5"'
     }
 
-    It 'Kirs4 About keeps version edition build expression' {
+    It 'Kirs5 About keeps version edition build expression' {
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
     }
 
-    It 'Kirs4 rendered About identity is exact' {
+    It 'Kirs5 rendered About identity is exact' {
         # Identity is the product of MainVersion + edition + buildVersion constants.
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.4"'
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*24\b'
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.5"'
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*25\b'
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
-        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.4 (24)).
-        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.4\s+\(24\)') -or
+        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.5 (25)).
+        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.5\s+\(25\)') -or
             ($script:SmartZipSource -match 'MainVersion\s*:=\s*"3\.6"' -and
-             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.4"' -and
-             $script:SmartZipSource -match 'buildVersion\s*:=\s*24\b') | Should Be $true
+             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.5"' -and
+             $script:SmartZipSource -match 'buildVersion\s*:=\s*25\b') | Should Be $true
     }
 
-    It 'Kirs4 About keeps removed rows absent' {
+    It 'Kirs5 About keeps removed rows absent' {
         $script:SmartZipSource | Should Not Match '支持作者'
         $script:SmartZipSource | Should Not Match '建议反馈'
         $script:SmartZipSource | Should Not Match '论坛反馈'

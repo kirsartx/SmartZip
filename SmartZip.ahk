@@ -1,17 +1,17 @@
-﻿;@Ahk2Exe-SetName         SmartZip
+;@Ahk2Exe-SetName         SmartZip
 ;@Ahk2Exe-SetDescription  7-zip的功能扩展
 ;@Ahk2Exe-SetCopyright    Copyright (c) since 2022
 ;@Ahk2Exe-SetCompanyName  viv
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6.0.0
-;@Ahk2Exe-SetProductVersion 24.0.0.0
+;@Ahk2Exe-SetProductVersion 25.0.0.0
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 24
+buildVersion := 25
 MainVersion := "3.6"
-edition := "Kirs.4"
+edition := "Kirs.5"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/24 05:00:00"
+buileTime := "2026/7/25 09:00:00"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
@@ -50,6 +50,16 @@ class SmartZip
 
         if !FileExist(this.7z) || !FileExist(this.7zG) || !FileExist(this.7zFM)
             return MsgBox("7-zip 文件夹中必需包含 7z.exe,7zG.exe,7zFM.exe`n请检测文件夹是否设置正确")
+
+        ; Kirs.5: auto-detect 7-Zip version for diagnostic logs
+        try {
+            cap := this.RunCmdCapture('"' this.7z '"', "UTF-8")
+            if (cap.output != "") {
+                firstLine := StrSplit(cap.output, "`n", "`r")[1]
+                this.sevenZipVersion := Trim(firstLine)
+            }
+        }
+
     }
 
     Init(argsArr)
@@ -279,7 +289,7 @@ class SmartZip
             if !loopPath
                 this.index := A_Index
 
-            this.temp := tmpDir := '__7z' A_Now
+            this.temp := tmpDir := '__7z' A_Now A_MSec
 
             this.currentSize := FileGetSize(i)
             hideBool := this.currentSize / 1024 / 1024 < this.hideRunSize
@@ -356,6 +366,10 @@ class SmartZip
 
         if loopPath
             return
+
+        ; Kirs.5: optionally open output directory after single-file extraction
+        if (!isBatch && ini.openOutputDir)
+            Run('explorer.exe "' A_WorkingDir '"')
 
         if (!loopPath && isBatch)
             this.ShowBatchDiagnosticSummary()
@@ -2296,6 +2310,7 @@ Setting()
     GuiCheckBox("nestingMuilt", ini.nestingMuilt, "解压嵌套文件夹", "只检查第一层文件夹；嵌套源包仅在完全干净成功后移入回收站", "x+170 yp")
     GuiCheckBox("delSource", ini.delSource, "解压后将源文件移入回收站", "仅在完全干净成功（无警告）时处理；警告与失败均保留源包；分卷永不自动处理")
     GuiCheckBox("delWhenHasPass", ini.delWhenHasPass, "仅将含密码的源文件移入回收站", "不需要选中上方源文件选项；同样仅完全干净成功时生效", "yp x+90")
+    GuiCheckBox("openOutputDir", ini.openOutputDir, "解压后打开输出目录", "成功解压后自动在资源管理器中打开输出文件夹")
 
     GuiCheckBox("autoAddPass", ini.autoAddPass, "自动添加密码", "在7-Zip输入密码框选中显示密码保存")
     GuiCheckBox("dynamicPassSort", ini.dynamicPassSort, "密码动态排序", "把使用次数最多的排在前面")
@@ -2744,6 +2759,7 @@ class ini
             openAdd: ["", "7z"],
             lastPass: ["", "temp"],
             version: [0, "temp"],
+            openOutputDir: [0, "set"],
         }
 
     static __Get(Key, Params)
@@ -2869,6 +2885,7 @@ IniCreate()
         ini.setWrite("successPercent", 90)
         ini.setWrite("logLevel", 0)
         ini.setWrite("cmdLog", 0)
+        ini.setWrite("openOutputDir", 0)
         ini.setWrite("hideRunSize", 10)
 
         ini.Write(0, "addDir2Pass", "set")
