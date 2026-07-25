@@ -367,9 +367,13 @@ class SmartZip
         if loopPath
             return
 
-        ; Kirs.5: optionally open output directory after single-file extraction
-        if (!isBatch && ini.openOutputDir)
-            Run('explorer.exe "' A_WorkingDir '"')
+        ; Kirs.5: optionally open output after single-file extraction
+        if (!isBatch && ini.openOutputDir) {
+            if IsSet(outFile) && FileExist(outFile)
+                Run('explorer.exe /select,"' outFile '"')
+            else
+                Run('explorer.exe "' A_WorkingDir '"')
+        }
 
         if (!loopPath && isBatch)
             this.ShowBatchDiagnosticSummary()
