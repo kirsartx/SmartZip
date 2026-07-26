@@ -976,9 +976,11 @@ class SmartZip
 
             try
             {
-                winmgmts := ComObjGet("winmgmts:")
+                static wmiCached := ""
+                if !wmiCached
+                    wmiCached := ComObjGet("winmgmts:")
                 matches := []
-                for proc in winmgmts.ExecQuery(this.query)
+                for proc in wmiCached.ExecQuery(this.query)
                     if proc.ProcessID = this.pid
                         matches.Push(proc)
                 if matches.Length != 1
