@@ -6,9 +6,9 @@ Pester **3.4** (classic `Should` syntax) plus AutoHotkey v2 harnesses.
 
 | Tool | Path / notes |
 |---|---|
-| 7-Zip Zstandard | `C:\Tool\7-Zip-Zstandard\7z.exe` (hard-coded in Real7Zip suite; user engine directory) |
-| AutoHotkey 2.0.26 | `C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\AutoHotkey_2.0.26\AutoHotkey64.exe` |
-| Ahk2Exe | `...\smartzip-36-ahk-toolchain\Ahk2Exe1.1.37.02a2\Ahk2Exe.exe` |
+| 7-Zip Zstandard | `C:\Tool\7-Zip-Zstandard\7z.exe` (user engine directory) |
+| AutoHotkey v2 | Auto-detected by `tests/TestHelper.ps1` (checks `%TEMP%\ahk_tools`, Program Files) |
+| Ahk2Exe | Auto-detected by `tests/TestHelper.ps1` |
 | PowerShell | 5.1+, Pester 3.4 |
 
 Integration / smoke never read or write `C:\Tool\SmartZip`. Every archive, INI, log, compiled test EXE, and probe artifact stays under one unique:
