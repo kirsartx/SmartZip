@@ -16,7 +16,8 @@ if (-not $PSScriptRoot) {
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:HarnessPath = Join-Path $PSScriptRoot 'ArchiveDiagnostics.Harness.ahk'
 $script:LibPath = Join-Path $script:RepoRoot 'lib\ArchiveDiagnostics.ahk'
-$script:AhkExe = 'C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\AutoHotkey_2.0.26\AutoHotkey64.exe'
+. (Join-Path $PSScriptRoot 'TestHelper.ps1')
+$script:AhkExe = (Resolve-AhkExe)
 $script:StaticPath = Join-Path $PSScriptRoot 'SmartZip.Static.Tests.ps1'
 $script:Results = @{}
 

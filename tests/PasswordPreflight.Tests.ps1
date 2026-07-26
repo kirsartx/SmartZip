@@ -14,7 +14,8 @@ $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:SmartZipPath = Join-Path $script:RepoRoot 'SmartZip.ahk'
 $script:HarnessPath = Join-Path $PSScriptRoot 'PasswordPreflight.Harness.ahk'
 $script:FragmentPath = Join-Path $PSScriptRoot 'PasswordPreflight.Fragment.ahk'
-$script:AhkExe = 'C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\AutoHotkey_2.0.26\AutoHotkey64.exe'
+. (Join-Path $PSScriptRoot 'TestHelper.ps1')
+$script:AhkExe = (Resolve-AhkExe)
 
 function Get-SmartZipSourceText {
     $raw = Get-Content -LiteralPath $script:SmartZipPath -Raw -Encoding UTF8

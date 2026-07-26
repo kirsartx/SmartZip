@@ -6,3 +6,4 @@ donate
 .worktrees/
 *.exe
 .superpowers/
+docs/superpowers/

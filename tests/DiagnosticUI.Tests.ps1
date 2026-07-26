@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 if (-not $PSScriptRoot) { $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:HarnessSrc = Join-Path $PSScriptRoot 'DiagnosticUI.Harness.ahk'
-$script:AhkExe = 'C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\AutoHotkey_2.0.26\AutoHotkey64.exe'
+. (Join-Path $PSScriptRoot 'TestHelper.ps1')
+$script:AhkExe = (Resolve-AhkExe)
 
 $script:CaseKeys = @(
     'reason_OK', 'reason_OK_WITH_WARNING', 'reason_NEED_PASSWORD', 'reason_WRONG_PASSWORD',

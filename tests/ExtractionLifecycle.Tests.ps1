@@ -9,7 +9,8 @@ if (-not $PSScriptRoot) {
 }
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:HarnessPath = Join-Path $PSScriptRoot 'ExtractionLifecycle.Harness.ahk'
-$script:AhkExe = 'C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\AutoHotkey_2.0.26\AutoHotkey64.exe'
+. (Join-Path $PSScriptRoot 'TestHelper.ps1')
+$script:AhkExe = (Resolve-AhkExe)
 
 function Get-SmartZipSourceText([string]$SmartZipPath) {
     $raw = Get-Content -LiteralPath $SmartZipPath -Raw -Encoding UTF8

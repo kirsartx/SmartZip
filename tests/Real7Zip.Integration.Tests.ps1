@@ -13,8 +13,9 @@ if (-not $PSScriptRoot) {
 }
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:SevenZip = 'C:\Tool\7-Zip-Zstandard\7z.exe'
-$script:AhkExe = 'C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\AutoHotkey_2.0.26\AutoHotkey64.exe'
-$script:Ahk2Exe = 'C:\Users\Kirs\AppData\Local\Temp\smartzip-36-ahk-toolchain\Ahk2Exe1.1.37.02a2\Ahk2Exe.exe'
+. (Join-Path $PSScriptRoot 'TestHelper.ps1')
+$script:AhkExe = (Resolve-AhkExe)
+$script:Ahk2Exe = (Resolve-Ahk2Exe)
 $script:FixtureGen = Join-Path $PSScriptRoot 'New-ExtractionReliabilityFixtures.ps1'
 $script:ScenarioRunner = Join-Path $PSScriptRoot 'Invoke-CompiledSmartZipScenario.ps1'
 $script:SmokeRunner = Join-Path $PSScriptRoot 'Invoke-ProductionSmartZipSmoke.ps1'
