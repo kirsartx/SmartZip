@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 <#
 .SYNOPSIS
   Pester 3.4 wrapper for PasswordPreflight.Harness.ahk

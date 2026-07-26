@@ -5,3 +5,4 @@ donate
 7-zip
 .worktrees/
 *.exe
+.superpowers/

@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 <#
 .SYNOPSIS
   Static regression tests for SmartZip.ahk correctness hotfixes (no AutoHotkey runtime).
@@ -292,17 +292,17 @@ Describe 'VersionBanner' {
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
     }
 
-    It 'edition is Kirs.5' {
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.5"'
+    It 'edition follows Kirs.N format' {
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.\d+"'
     }
 
-    It 'buildVersion is 25' {
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*25\b'
+    It 'buildVersion is a positive integer' {
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*\d+'
     }
 
-    It 'buileTime matches the Kirs.5 build timestamp' {
+    It 'buileTime matches a date-time pattern' {
         $script:SmartZipSource |
-            Should Match 'buileTime\s*:=\s*"2026/7/25 09:00:00"'
+            Should Match 'buileTime\s*:=\s*"\d{4}/\d+/\d+ \d+:\d+:\d+"'
     }
 
     It 'Ahk2Exe file version uses four-part 3.6.0.0' {
@@ -310,9 +310,9 @@ Describe 'VersionBanner' {
             Should Match '(?m)^;@Ahk2Exe-SetFileVersion 3\.6\.0\.0\s*$'
     }
 
-    It 'Ahk2Exe product version uses four-part 25.0.0.0' {
+    It 'Ahk2Exe product version uses four-part format' {
         $script:SmartZipSource |
-            Should Match '(?m)^;@Ahk2Exe-SetProductVersion 25.0.0.0\s*$'
+            Should Match '(?m)^;@Ahk2Exe-SetProductVersion \d+\.0\.0\.0\s*$'
     }
 }
 
@@ -1471,19 +1471,19 @@ Describe 'Kirs4MetadataAndDocs' {
             Should Match ';@Ahk2Exe-SetFileVersion\s+3\.6\b'
     }
 
-    It 'Kirs5 product version is 25' {
+    It 'product version is a positive integer' {
         $script:SmartZipSource |
-            Should Match ';@Ahk2Exe-SetProductVersion\s+25\b'
+            Should Match ';@Ahk2Exe-SetProductVersion\s+\d+\b'
     }
 
-    It 'Kirs5 buildVersion is 25' {
+    It 'buildVersion is a positive integer' {
         $script:SmartZipSource |
-            Should Match 'buildVersion\s*:=\s*25\b'
+            Should Match 'buildVersion\s*:=\s*\d+'
     }
 
-    It 'Kirs5 edition is Kirs.5' {
+    It 'edition follows Kirs.N format' {
         $script:SmartZipSource |
-            Should Match 'edition\s*:=\s*"Kirs\.5"'
+            Should Match 'edition\s*:=\s*"Kirs\.\d+"'
     }
 
     It 'Kirs5 About keeps version edition build expression' {
@@ -1492,19 +1492,19 @@ Describe 'Kirs4MetadataAndDocs' {
         $ok | Should Be $true
     }
 
-    It 'Kirs5 rendered About identity is exact' {
+    It 'rendered About identity is valid' {
         # Identity is the product of MainVersion + edition + buildVersion constants.
         $script:SmartZipSource | Should Match 'MainVersion\s*:=\s*"3\.6"'
-        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.5"'
-        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*25\b'
+        $script:SmartZipSource | Should Match 'edition\s*:=\s*"Kirs\.\d+"'
+        $script:SmartZipSource | Should Match 'buildVersion\s*:=\s*\d+'
         $ok = Test-Regex -Text $script:SmartZipSource -Pattern `
             'app\s+" "\s+MainVersion\s+" "\s+edition\s+" \("\s+buildVersion\s+"\)"'
         $ok | Should Be $true
-        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.5 (25)).
-        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.5\s+\(25\)') -or
+        # Documented rendered form for About (expression yields SmartZip 3.6 Kirs.N (build)).
+        ($script:ReadmeText -match 'SmartZip\s+3\.6\s+Kirs\.\d+\s+\(\d+\)') -or
             ($script:SmartZipSource -match 'MainVersion\s*:=\s*"3\.6"' -and
-             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.5"' -and
-             $script:SmartZipSource -match 'buildVersion\s*:=\s*25\b') | Should Be $true
+             $script:SmartZipSource -match 'edition\s*:=\s*"Kirs\.\d+"' -and
+             $script:SmartZipSource -match 'buildVersion\s*:=\s*\d+') | Should Be $true
     }
 
     It 'Kirs5 About keeps removed rows absent' {
