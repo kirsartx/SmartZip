@@ -1,4 +1,4 @@
-#SingleInstance Ignore
+﻿#SingleInstance Ignore
 #NoTrayIcon
 SetWorkingDir(A_ScriptDir)
 

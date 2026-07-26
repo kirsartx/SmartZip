@@ -5,13 +5,13 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6.0.0
-;@Ahk2Exe-SetProductVersion 26.0.0.0
+;@Ahk2Exe-SetProductVersion 27.0.0.0
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 26
+buildVersion := 27
 MainVersion := "3.6"
-edition := "Kirs.6"
+edition := "Kirs.7"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/26 00:10:00"
+buileTime := "2026/7/26 09:31:00"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
@@ -2900,6 +2900,8 @@ ResolveSevenZipDir(preferred := "") {
     candidates.Push("C:\Program Files\7-Zip-Zstandard")
     candidates.Push("C:\Program Files\7-Zip")
     candidates.Push("C:\Program Files (x86)\7-Zip")
+    candidates.Push(EnvGet("LOCALAPPDATA") "\Programs\7-Zip")
+    candidates.Push(EnvGet("LOCALAPPDATA") "\Programs\7-Zip-Zstandard")
 
     seen := Map()
     for dir in candidates {
@@ -3018,6 +3020,9 @@ IniCreate()
         ini.Write("gz", 7)
         ini.Write("gzip", 8)
         ini.Write("tar", 9)
+        ini.Write("xz", 10)
+        ini.Write("zst", 11)
+        ini.Write("lzma", 12)
 
         ini.Write("^\d+$", 1, "extExp")
 
