@@ -2905,6 +2905,17 @@ ResolveSevenZipDir(preferred := "") {
     candidates.Push(EnvGet("LOCALAPPDATA") "\Programs\7-Zip")
     candidates.Push(EnvGet("LOCALAPPDATA") "\Programs\7-Zip-Zstandard")
 
+    ; Registry: catches any 7-Zip variant regardless of install location
+    try {
+        for regKey in ["HKLM\SOFTWARE\7-Zip-Zstandard", "HKLM\SOFTWARE\7-Zip", "HKCU\SOFTWARE\7-Zip-Zstandard", "HKCU\SOFTWARE\7-Zip"] {
+            try {
+                regPath := RegRead(regKey, "Path", "")
+                if (regPath != "")
+                    candidates.Push(RTrim(regPath, "\"))
+            }
+        }
+    }
+
     seen := Map()
     for dir in candidates {
         dir := dir ~= "i)^[a-z]:\\$" ? dir : RTrim(dir, "\")
