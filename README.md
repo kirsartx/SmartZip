@@ -16,6 +16,21 @@
  - 压缩
    - 全是文件夹则每个文件夹生成一个压缩包, 否则生成单个压缩包
 
+## 3.6 Kirs.9 性能与健壮性
+
+SmartZip **3.6 Kirs.9 (29)** 聚焦内部代码质量和启动效率。
+
+### 启动与性能
+
+- MigrateDeprecatedExtExp 消除冗余的二次 ini 读取（每次启动少读 N 次）
+- GetWriteIO 缓存 WMI COM 连接，避免错误模式下每秒重建
+
+### 健壮性
+
+- ResolveSevenZipDir 新增注册表探测，自动发现任意位置的 7-Zip 安装
+- 诊断日志轮转包裹 try-catch，防止日志写入失败导致解压中断
+
+
 ## 3.6 Kirs.8 多选修复
 
 SmartZip **3.6 Kirs.8 (28)** 修复 Kirs.6 引入的多选文件回归。
