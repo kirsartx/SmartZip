@@ -16,6 +16,17 @@
  - 压缩
    - 全是文件夹则每个文件夹生成一个压缩包, 否则生成单个压缩包
 
+## 3.6 Kirs.8 多选修复
+
+SmartZip **3.6 Kirs.8 (28)** 修复 Kirs.6 引入的多选文件回归。
+
+### 右键菜单多选
+
+- Kirs.6 改用注册表 %1 传参后，多选文件只取到第一个
+- Kirs.8 恢复剪贴板捕获全部选中文件，%1 作为可靠兜底
+- 单文件场景保持 %1 路径（避免剪贴板竞态）
+
+
 ## 3.6 Kirs.7 格式扩展与编译修复
 
 SmartZip **3.6 Kirs.7 (27)** 小幅迭代，扩展默认格式支持并修复分发相关的编码问题。
@@ -290,6 +301,6 @@ C:\Tool\7-Zip-Zstandard\7z.exe
 
 ## 相关链接
   - [7-zip](https://www.7-zip.org/)
-    - 测试基于 7-Zip 21.07 版本
+    - 测试基于 7-Zip 26.02 ZS（Zstandard）版本
   - [小众软件](https://www.appinn.com/smartzip-for-7zip/)
   - [小众软件发现频道](https://meta.appinn.net/t/topic/33555)

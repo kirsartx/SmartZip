@@ -5,13 +5,13 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6.0.0
-;@Ahk2Exe-SetProductVersion 27.0.0.0
+;@Ahk2Exe-SetProductVersion 28.0.0.0
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 27
+buildVersion := 28
 MainVersion := "3.6"
-edition := "Kirs.7"
+edition := "Kirs.8"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/26 09:31:00"
+buileTime := "2026/7/26 09:48:00"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
