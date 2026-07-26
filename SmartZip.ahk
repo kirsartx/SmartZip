@@ -5,20 +5,21 @@
 ;@Ahk2Exe-SetOrigFilename SmartZip.exe
 ;@Ahk2Exe-SetMainIcon     ico.ico
 ;@Ahk2Exe-SetFileVersion 3.6.0.0
-;@Ahk2Exe-SetProductVersion 25.0.0.0
+;@Ahk2Exe-SetProductVersion 26.0.0.0
 ;@Ahk2Exe-ExeName SmartZip.exe
-buildVersion := 25
+buildVersion := 26
 MainVersion := "3.6"
-edition := "Kirs.5"
+edition := "Kirs.6"
 ;Msgbox FormatTime(A_Now, "yyyy/M/d H:m:s")
-buileTime := "2026/7/25 09:00:00"
+buileTime := "2026/7/26 00:10:00"
 app := "SmartZip"
 #SingleInstance off
 #NoTrayIcon
 
 ini.Init(A_ScriptDir "\" app ".ini")
 IniCreate
-zip := SmartZip(RelativePath(ini.zipDir))
+CleanupStaleTempDirs()
+zip := SmartZip(ResolveSevenZipDir(RelativePath(ini.zipDir)))
 
 ;https://www.iconfont.cn/collections/detail?spm=a313x.7781069.0.da5a778a4&cid=24599
 icon := FileExist(icon := RelativePath(ini.icon)) ? icon : ""
@@ -38,20 +39,36 @@ class SmartZip
         this.now := A_TickCount
         this.exitCode := -1
         this.setShow := false
+        this.sevenZipVersion := "unknown"
 
         sevenZipDir := sevenZipDir ~= "i)^[a-z]:\\$" ? sevenZipDir : RTrim(sevenZipDir, "\")
 
+        if !DirExist(sevenZipDir) || !FileExist(sevenZipDir "\7z.exe")
+            || !FileExist(sevenZipDir "\7zG.exe") || !FileExist(sevenZipDir "\7zFM.exe") {
+            sevenZipDir := ResolveSevenZipDir(sevenZipDir)
+        }
+
         if !DirExist(sevenZipDir)
-            return MsgBox("7-zip 文件夹不存在,请设置其路径")
+            return MsgBox("7-zip 文件夹不存在,请设置其路径`n可在设置里指定 7-zip 路径，或安装 7-Zip / 7-Zip-Zstandard")
 
         this.7z := sevenZipDir "\7z.exe"
         this.7zG := sevenZipDir "\7zG.exe"
         this.7zFM := sevenZipDir "\7zFM.exe"
+        this.sevenZipDir := sevenZipDir
 
         if !FileExist(this.7z) || !FileExist(this.7zG) || !FileExist(this.7zFM)
             return MsgBox("7-zip 文件夹中必需包含 7z.exe,7zG.exe,7zFM.exe`n请检测文件夹是否设置正确")
 
-        ; Kirs.5: auto-detect 7-Zip version for diagnostic logs
+        ; Persist a working path so next launch skips the fallback search.
+        try {
+            resolvedRel := sevenZipDir
+            if (InStr(StrLower(sevenZipDir), StrLower(A_ScriptDir "\")) = 1)
+                resolvedRel := "%SmartZipDir%" SubStr(sevenZipDir, StrLen(A_ScriptDir) + 1)
+            if (ini.zipDir != resolvedRel && ini.zipDir != sevenZipDir)
+                ini.setWrite("zipDir", resolvedRel)
+        }
+
+        ; Kirs.5/6: auto-detect 7-Zip version for diagnostics and About tab
         try {
             cap := this.RunCmdCapture('"' this.7z '"', "UTF-8")
             if (cap.output != "") {
@@ -64,7 +81,6 @@ class SmartZip
                 }
             }
         }
-
     }
 
     Init(argsArr)
@@ -1282,7 +1298,33 @@ class SmartZip
         if this.cmdLog
             this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
         cap := this.RunCmdCapture(cmd, "UTF-8")
-        return Classify7zResult("probe", cap.exitCode, cap.output, path)
+        result := Classify7zResult("probe", cap.exitCode, cap.output, path)
+
+        ; Some damaged/partial 7z packages report "not archive" on list, but still yield a more
+        ; specific diagnosis on test (header corrupt / truncated / password). Prefer that signal
+        ; for known archive extensions so users no longer only see a generic header error.
+        if (result.status = ArchiveStatus.NOT_ARCHIVE) {
+            SplitPath(path, , , &ext)
+            if (ext != "" && this.IsArchive(ext)) {
+                tcmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' path '"'
+                if this.cmdLog
+                    this.testLog .= '`n#####`n' RedactDiagnostic(tcmd) '`n'
+                tcap := this.RunCmdCapture(tcmd, "UTF-8")
+                tretry := Classify7zResult("probe", tcap.exitCode, tcap.output, path)
+                if (tretry.status = ArchiveStatus.HEADER_CORRUPT
+                    || tretry.status = ArchiveStatus.TRUNCATED
+                    || tretry.status = ArchiveStatus.DATA_CORRUPT
+                    || tretry.status = ArchiveStatus.NEED_PASSWORD
+                    || tretry.status = ArchiveStatus.WRONG_PASSWORD
+                    || tretry.status = ArchiveStatus.MISSING_VOLUME
+                    || tretry.status = ArchiveStatus.UNSUPPORTED_METHOD
+                    || tretry.status = ArchiveStatus.IO_ERROR) {
+                    tretry.stage := "probe"
+                    return tretry
+                }
+            }
+        }
+        return result
     }
 
     TestArchive(path, password := "") {
@@ -2392,6 +2434,10 @@ Setting()
     set.AddText("", app " " MainVersion " " edition " (" buildVersion ")")
     lineGeneration
     set.AddText("", "修改时间 " buileTime)
+    sevenZipAbout := zip.HasOwnProp("sevenZipVersion") ? zip.sevenZipVersion : "unknown"
+    sevenZipDirAbout := zip.HasOwnProp("sevenZipDir") ? zip.sevenZipDir : RelativePath(ini.zipDir)
+    set.AddText("", "7-Zip: " sevenZipAbout)
+    set.AddText("w420", "路径: " sevenZipDirAbout)
     set.AddText()
     set.AddText(, "相关链接")
     set.AddLink(, '<a id="GitHub" href="https://github.com/kirsartx/SmartZip">GitHub</a>')
@@ -2673,7 +2719,7 @@ Setting()
         {
             RegWrite(icon, "REG_SZ", keyPathForFile "\UnZip", "Icon")
             RegWrite(ini.unZipName, "REG_SZ", keyPathForFile "\UnZip")
-            RegWrite(menuPath "x", "REG_SZ", keyPathForFile "\UnZip\command")
+            RegWrite(menuPath 'x "%1"', "REG_SZ", keyPathForFile "\UnZip\command")
         } else
             try RegDeleteKey(keyPathForFile "\UnZip")
 
@@ -2681,7 +2727,7 @@ Setting()
         {
             RegWrite(icon, "REG_SZ", keyPathForAll "\OpenZip", "Icon")
             RegWrite(ini.openZipName, "REG_SZ", keyPathForAll "\OpenZip")
-            RegWrite(menuPath "o", "REG_SZ", keyPathForAll "\OpenZip\command")
+            RegWrite(menuPath 'o "%1"', "REG_SZ", keyPathForAll "\OpenZip\command")
         } else
             try RegDeleteKey(keyPathForAll "\OpenZip")
 
@@ -2689,7 +2735,7 @@ Setting()
         {
             RegWrite(icon, "REG_SZ", keyPathForAll "\AddZip", "Icon")
             RegWrite(ini.addZipName, "REG_SZ", keyPathForAll "\AddZip")
-            RegWrite(menuPath "a", "REG_SZ", keyPathForAll "\AddZip\command")
+            RegWrite(menuPath 'a "%1"', "REG_SZ", keyPathForAll "\AddZip\command")
         } else
             try RegDeleteKey(keyPathForAll "\AddZip")
 
@@ -2697,7 +2743,7 @@ Setting()
         {
             RegWrite(icon, "REG_SZ", keyPathForFile "\unZipCP", "Icon")
             RegWrite(ini.unZipCPName, "REG_SZ", "HKCU\SOFTWARE\Classes\*\shell\unZipCP")
-            RegWrite(menuPath "xc", "REG_SZ", "HKCU\SOFTWARE\Classes\*\shell\unZipCP\command")
+            RegWrite(menuPath 'xc "%1"', "REG_SZ", "HKCU\SOFTWARE\Classes\*\shell\unZipCP\command")
         } else
             try RegDeleteKey("HKCU\SOFTWARE\Classes\*\shell\unZipCP")
 
@@ -2836,6 +2882,61 @@ class ini
 
 RelativePath(str) => StrReplace(str, "%SmartZipDir%", A_ScriptDir)
 
+IsValidSevenZipDir(dir) {
+    if (dir = "" || !DirExist(dir))
+        return false
+    return FileExist(dir "\7z.exe") && FileExist(dir "\7zG.exe") && FileExist(dir "\7zFM.exe")
+}
+
+ResolveSevenZipDir(preferred := "") {
+    candidates := []
+    if (preferred != "")
+        candidates.Push(preferred)
+    candidates.Push(A_ScriptDir "\7-zip")
+    candidates.Push(A_ScriptDir "\7-Zip")
+    candidates.Push(A_ScriptDir "\7-Zip-Zstandard")
+    candidates.Push("C:\Tool\7-Zip-Zstandard")
+    candidates.Push("C:\Tool\7-zip")
+    candidates.Push("C:\Program Files\7-Zip-Zstandard")
+    candidates.Push("C:\Program Files\7-Zip")
+    candidates.Push("C:\Program Files (x86)\7-Zip")
+
+    seen := Map()
+    for dir in candidates {
+        dir := dir ~= "i)^[a-z]:\\$" ? dir : RTrim(dir, "\")
+        key := StrLower(dir)
+        if seen.Has(key)
+            continue
+        seen[key] := true
+        if IsValidSevenZipDir(dir)
+            return dir
+    }
+    return preferred != "" ? preferred : (A_ScriptDir "\7-zip")
+}
+
+CleanupStaleTempDirs() {
+    ; Leftover __7z* folders from crashed runs; only remove empty/stale temp dirs older than 1 hour.
+    cutoff := DateAdd(A_Now, -1, "Hours")
+    for root in [A_ScriptDir, A_WorkingDir] {
+        if (root = "")
+            continue
+        loop files root "\__7z*", "D" {
+            try {
+                if (A_LoopFileTimeModified != "" && A_LoopFileTimeModified > cutoff)
+                    continue
+                empty := true
+                loop files A_LoopFileFullPath "\*.*", "DF" {
+                    empty := false
+                    break
+                }
+                if empty
+                    DirDelete(A_LoopFileFullPath, true)
+            }
+        }
+    }
+}
+
+
 MigrateDeprecatedExtExp()
 {
     kept := []
@@ -2876,7 +2977,12 @@ IniCreate()
 
     if !iniExist
     {
-        ini.setWrite("zipDir", "%SmartZipDir%\7-zip")
+        ; Auto-detect 7-Zip on fresh install
+        detected7z := ResolveSevenZipDir()
+        if IsValidSevenZipDir(detected7z) && detected7z != A_ScriptDir "\7-zip"
+            ini.setWrite("zipDir", detected7z)
+        else
+            ini.setWrite("zipDir", "%SmartZipDir%\7-zip")
         ini.setWrite("icon", A_IsCompiled ? "%SmartZipDir%\SmartZip.exe" : "%SmartZipDir%\ico.ico")
         ini.setWrite("nesting", 1)
         ini.setWrite("nestingMuilt", 0)
