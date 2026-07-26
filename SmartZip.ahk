@@ -1959,8 +1959,10 @@ class SmartZip
         logPath := A_ScriptDir "\SmartZip-diagnostics.log"
         if this.HasOwnProp("scriptDirOverride") && this.scriptDirOverride != ""
             logPath := this.scriptDirOverride "\SmartZip-diagnostics.log"
-        this.RotateDiagnosticLogIfNeeded(logPath)
-        FileAppend(text "`r`n", logPath, "UTF-8")
+        try {
+            this.RotateDiagnosticLogIfNeeded(logPath)
+            FileAppend(text "`r`n", logPath, "UTF-8")
+        }
         if this.HasOwnProp("fileAppends")
             this.fileAppends.Push({ path: logPath, encoding: "UTF-8", text: text })
     }
