@@ -2958,27 +2958,19 @@ MigrateDeprecatedExtExp()
 {
     kept := []
     idx := 0
+    hadDeprecated := false
     loop
     {
         if !(var := ini.Read(A_Index, , "extExp"))
             break
         idx := A_Index
-        if (var == "zi" || var == "7" || var == "z")
-            continue
-        kept.Push(var)
-    }
-    if !idx
-        return
-    hadDeprecated := false
-    loop idx
-    {
-        var := ini.Read(A_Index, , "extExp")
         if (var == "zi" || var == "7" || var == "z") {
             hadDeprecated := true
-            break
+            continue
         }
+        kept.Push(var)
     }
-    if !hadDeprecated
+    if !idx || !hadDeprecated
         return
     loop idx
         ini.Delete("extExp", A_Index)
