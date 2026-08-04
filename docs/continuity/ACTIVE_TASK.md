@@ -6,7 +6,7 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
 
 ## Current Git State
 
-- Branch: codex/diagnostic-ui-contract-repair
+- Branch: main
 - Latest committed handoff protocol: 0d314a8 docs: add cross-model handoff protocol
 - Existing user worktree change: tests/RunCmdCapture.Fragment.ahk
 - Change classification: CRLF-to-LF conversion only; no functional code difference from HEAD has been observed.
