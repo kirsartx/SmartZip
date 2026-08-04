@@ -186,6 +186,22 @@ class DiagnosticUIHost {
     7z := "7z.exe"
     7zG := "7zG.exe"
     sevenZipVersion := "23.01"
+    ext := Map("7z", true, "zip", true, "rar", true)
+    extExp := []
+
+    IsArchive(ext)
+    {
+        ext := StrLower(ext)
+        if !ext
+            return false
+        if this.ext.Has(ext)
+            return true
+        for i in this.extExp
+            if ext ~= "i)" i
+                return true
+        return false
+    }
+
     muilt := false
     batchDiagnostic := { success: [], warning: [], failure: [], skipped: [] }
     diagHeadless := true
@@ -386,7 +402,8 @@ RunDiagnosticUICommand(cmd, jsonText, caseKey := "") {
 
     if (cmd = "reason") {
         status := JsonGet(jsonText, "status", "OK")
-        r := MakeResult(status, "D:\\data\\folder\\pack.7z", jsonText)
+        archivePath := JsonUnescape(JsonGet(jsonText, "archivePath", "D:\\data\\folder\\plain.txt"))
+        r := MakeResult(status, archivePath, jsonText)
         reason := host.DiagnosticReason(r)
         rec := host.DiagnosticRecommendation(r)
         return '{"key":"' caseKey '","status":"' status '","reason":"' EscapeJson(reason) '","recommendation":"' EscapeJson(rec) '"}'
@@ -819,6 +836,12 @@ Describe 'DiagnosticUI' {
             (Get-JsonField $out 'reason') | Should Be $expected[0]
             (Get-JsonField $out 'recommendation') | Should Be $expected[1]
         }
+    }
+
+    It 'reason_NOT_ARCHIVE_known_archive_extension' {
+        $out = Invoke-DiagnosticUICase -Command 'reason' -CaseKey 'reason_NOT_ARCHIVE_known_archive_extension' -Json '{"status":"NOT_ARCHIVE","archivePath":"D:\\data\\folder\\pack.7z"}' -StageDir $script:StageDir
+        (Get-JsonField $out 'reason') | Should Be '压缩包文件头可能已损坏或不完整。'
+        (Get-JsonField $out 'recommendation') | Should Be '请重新下载或复制完整源文件，或用 7-Zip 打开检查。'
     }
 
     It 'title_warning' {
