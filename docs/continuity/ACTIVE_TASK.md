@@ -6,7 +6,7 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
 
 ## Current Git State
 
-- Branch: main
+- Branch: codex/diagnostic-ui-contract-repair
 - Latest committed handoff protocol: 0d314a8 docs: add cross-model handoff protocol
 - Existing user worktree change: tests/RunCmdCapture.Fragment.ahk
 - Change classification: CRLF-to-LF conversion only; no functional code difference from HEAD has been observed.
@@ -19,11 +19,13 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
   docs/continuity/DECISIONS.md, and docs/continuity/RESUME_PROMPT.md.
 - Confirmed that the pending fragment change is formatting-only.
 - After the documentation handoff implementation, ran the full Pester gate. The first six suites passed 559 assertions total: SmartZip.Static (184), ArchiveDiagnostics (193), RunCmdCapture (15), PasswordPreflight (98), ExtractionLifecycle (39), and NestingMigration (30).
+- Added a contract-faithful `DiagnosticUIHost.IsArchive` seam and optional reason `archivePath` input; production `SmartZip.ahk` remains unchanged.
+- Added a known-extension `NOT_ARCHIVE` regression case. The focused DiagnosticUI suite now passes 53/53.
+- Completed the full eight-suite contract gate: 184/184, 193/193, 15/15, 98/98, 39/39, 30/30, 53/53, and 36/36; `git diff --check` passed and the 7-Zip probe reported 7-Zip 26.02 ZS.
 
 ## Remaining
 
 - Decide whether the pending LF-only test-fragment change should be reverted or committed as an intentional formatting change. Do not make that decision without user direction.
-- Investigate and fix the DiagnosticUI test-double/product-contract mismatch before claiming a full green baseline. `DiagnosticUI.Tests.ps1` reproducibly fails with 51 passed / 1 failed in `reason_NOT_ARCHIVE` at `tests\DiagnosticUI.Tests.ps1:819`: expected `文件不是可识别的压缩包。`, but received an empty reason. The final Real7Zip suite was not reached because the gate stops at this failure. Evidence indicates that `SmartZip.ahk`'s `DiagnosticReason` and `DiagnosticRecommendation` call `this.IsArchive(...)` for NOT_ARCHIVE, while the `DiagnosticUIHost` test double in `tests\DiagnosticUI.Tests.ps1` has no `IsArchive` method and uses a `.7z` fixture path, so its harness returns no reason. Do not change production code or tests until that mismatch is investigated and a contract decision is made.
 - Manual external acceptance is still pending: in a brand-new logged-in EchoBird conversation, paste `docs/continuity/RESUME_PROMPT.md` and verify its first response identifies the formatting-only test fragment and proposes `git status --short` plus `git diff --check` before editing. This has not yet run and requires user/account interaction.
 
 ## Changed Files
@@ -34,12 +36,18 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
 - `docs/continuity/ACTIVE_TASK.md`
 - `docs/continuity/DECISIONS.md`
 - `docs/continuity/RESUME_PROMPT.md`
+- `tests/DiagnosticUI.Tests.ps1`
+- `tests/README.md`
 
 ## Commands Run
 
 - `git status --short`: `M tests/RunCmdCapture.Fragment.ahk`
 - `git diff --check`: exit 0; no errors.
 - Full Pester gate: SmartZip.Static, ArchiveDiagnostics, RunCmdCapture, PasswordPreflight, ExtractionLifecycle, and NestingMigration passed (559 assertions total). `DiagnosticUI.Tests.ps1` then failed reproducibly (51 passed / 1 failed) in `reason_NOT_ARCHIVE`; Real7Zip was not reached.
+- RED focused run after adding the regression case: 51 passed / 2 failed, both `NOT_ARCHIVE` reason assertions, confirming the missing test-host seam.
+- GREEN focused run after the test-host fix: 53 passed / 0 failed in 10.25 seconds.
+- Full contract gate: SmartZip.Static 184/184, ArchiveDiagnostics 193/193, RunCmdCapture 15/15, PasswordPreflight 98/98, ExtractionLifecycle 39/39, NestingMigration 30/30, DiagnosticUI 53/53, and Real7Zip.Integration 36/36; all failures 0.
+- 7-Zip probe: `7-Zip 26.02 ZS v1.5.7 R1 (x64)`.
 
 ## Next Verification Command
 

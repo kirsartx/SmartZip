@@ -25,7 +25,7 @@ $expected = [ordered]@{
   'PasswordPreflight.Tests.ps1'=98
   'ExtractionLifecycle.Tests.ps1'=39
   'NestingMigration.Tests.ps1'=30
-  'DiagnosticUI.Tests.ps1'=52
+  'DiagnosticUI.Tests.ps1'=53
   'Real7Zip.Integration.Tests.ps1'=36
 }
 foreach ($item in $expected.GetEnumerator()) {
@@ -39,7 +39,7 @@ if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 & 'C:\Tool\7-Zip-Zstandard\7z.exe' i | Select-Object -First 5
 ```
 
-Expected exact totals after the final contract fix: static `184/184`, diagnostics `193/193`, capture `15/15`, password/workflow `98/98`, lifecycle `39/39`, nesting `30/30`, UI `52/52`, real integration `36/36`; overall `647/647`.
+Expected exact totals after the final contract fix: static `184/184`, diagnostics `193/193`, capture `15/15`, password/workflow `98/98`, lifecycle `39/39`, nesting `30/30`, UI `53/53`, real integration `36/36`; overall `648/648`.
 
 The final review adds two executable warning-token assertions and fifteen executable password-recovery contract assertions. The focused six-suite run is `596/596`; capture and real integration retain their unchanged expected counts for the next whole-branch gate.
 
