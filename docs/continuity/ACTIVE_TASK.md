@@ -8,8 +8,7 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
 
 - Branch: main
 - Latest committed handoff protocol: 0d314a8 docs: add cross-model handoff protocol
-- Existing user worktree change: tests/RunCmdCapture.Fragment.ahk
-- Change classification: CRLF-to-LF conversion only; no functional code difference from HEAD has been observed.
+- The previously pending `tests/RunCmdCapture.Fragment.ahk` CRLF-to-LF-only change was discarded after review; no functional code difference existed.
 
 ## Completed
 
@@ -25,7 +24,6 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
 
 ## Remaining
 
-- Decide whether the pending LF-only test-fragment change should be reverted or committed as an intentional formatting change. Do not make that decision without user direction.
 - Manual external acceptance is still pending: in a brand-new logged-in EchoBird conversation, paste `docs/continuity/RESUME_PROMPT.md` and verify its first response identifies the formatting-only test fragment and proposes `git status --short` plus `git diff --check` before editing. This has not yet run and requires user/account interaction.
 
 ## Changed Files
@@ -41,7 +39,7 @@ Maintain a portable handoff state so Codex and EchoBird can continue SmartZip wo
 
 ## Commands Run
 
-- `git status --short`: `M tests/RunCmdCapture.Fragment.ahk`
+- `git status --short`: clean after discarding the LF-only fragment change.
 - `git diff --check`: exit 0; no errors.
 - Full Pester gate: SmartZip.Static, ArchiveDiagnostics, RunCmdCapture, PasswordPreflight, ExtractionLifecycle, and NestingMigration passed (559 assertions total). `DiagnosticUI.Tests.ps1` then failed reproducibly (51 passed / 1 failed) in `reason_NOT_ARCHIVE`; Real7Zip was not reached.
 - RED focused run after adding the regression case: 51 passed / 2 failed, both `NOT_ARCHIVE` reason assertions, confirming the missing test-host seam.
