@@ -160,6 +160,7 @@ class NestingProductHost {
     extExp := []
     exitCode := -1
     callOrder := []
+    lastPreProbe := ""
     scriptedProbeStatus := ArchiveStatus.OK
     siblingOverride := unset
     recycled := []
@@ -169,6 +170,7 @@ class NestingProductHost {
 
     Reset() {
         this.callOrder := []
+        this.lastPreProbe := ""
         this.recycled := []
         this.exitCode := -1
         this.scriptedProbeStatus := ArchiveStatus.OK
@@ -180,8 +182,9 @@ class NestingProductHost {
         return ArchiveResult(this.scriptedProbeStatus, "probe", 0, path)
     }
 
-    Unzip(path) {
+    Unzip(path, preProbe := "") {
         this.callOrder.Push("unzip")
+        this.lastPreProbe := preProbe
     }
 
     Loging(params*) {
@@ -243,6 +246,7 @@ ProductNestedSourceAction(status, isNested, isVolumeMember) {
 RunNestedOrder(host, path, ext, status) {
     host.scriptedProbeStatus := status
     host.callOrder := []
+    host.lastPreProbe := ""
     if host.IsNestedArchiveCandidate(path, ext)
         host.callOrder.Push("candidate")
     host.UnZipNesting(path, ext)
@@ -324,10 +328,12 @@ nestZip := A_ScriptDir "\work\inner.zip"
 if !FileExist(nestZip)
     FileAppend("z", nestZip, "UTF-8")
 orderOk := RunNestedOrder(host, nestZip, "zip", ArchiveStatus.OK)
+okPreProbe := host.lastPreProbe
 orderBad := RunNestedOrder(host, nestZip, "zip", ArchiveStatus.NOT_ARCHIVE)
 okOrder := (orderOk.Length = 3 && orderOk[1] = "candidate" && orderOk[2] = "probe" && orderOk[3] = "unzip")
 badOrder := (orderBad.Length = 2 && orderBad[1] = "candidate" && orderBad[2] = "probe")
-AssertTrue(okOrder && badOrder, "nested_requires_probe_stage_before_extract")
+AssertTrue(okOrder && badOrder && IsObject(okPreProbe)
+    && okPreProbe.archivePath = nestZip, "nested_requires_probe_stage_before_extract")
 
 summary := "SUMMARY passed=" passCount " failed=" failCount
 lines.Push(summary)

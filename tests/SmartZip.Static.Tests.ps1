@@ -787,6 +787,7 @@ Describe 'PasswordPreflightSafety' {
         (Test-Regex -Text $b -Pattern '(?m)\bt\b.*-bso1|-bso1.*\bt\b| '' t ') | Should Be $true
         (Test-Regex -Text $b -Pattern '-p"') | Should Be $true
         (Test-Regex -Text $b -Pattern 'passwordUsed') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'result\.testVerified\s*:=\s*true') | Should Be $true
     }
 
     It 'cmdLog paths redact diagnostics and never concatenate raw password into log' {
@@ -833,6 +834,9 @@ Describe 'PasswordPreflightSafety' {
         $u = $script:UnzipBody
         (Test-Regex -Text $u -Pattern 'ProbeArchive\s*\(') | Should Be $true
         (Test-Regex -Text $u -Pattern 'ResolveArchivePassword\s*\(') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'testVerified') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'tr\s*:=\s*resolved') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'TestArchive\s*\(\s*path\s*,\s*resolved\.passwordUsed\s*\)') | Should Be $true
         # Legacy early-kill encrypted probe callback must no longer be the primary entry
         (Test-Regex -Text $u -Pattern 'CheckEncrypted') | Should Be $false
     }
