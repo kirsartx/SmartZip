@@ -487,7 +487,13 @@ class SmartZip
                     && (resolved.status = ArchiveStatus.OK)
                 forceTest := this.test || mayHandleSource || nestedMayRecycle
                 if (forceTest) {
-                    tr := this.TestArchive(path, resolved.passwordUsed)
+                    tr := ""
+                    if (resolved.HasOwnProp("testVerified") && resolved.testVerified
+                        && resolved.archivePath != ""
+                        && StrLower(resolved.archivePath) = StrLower(path))
+                        tr := resolved
+                    else
+                        tr := this.TestArchive(path, resolved.passwordUsed)
                     if (tr.status = ArchiveStatus.OK_WITH_WARNING) {
                         mayHandleSource := false
                         nestedMayRecycle := false
@@ -1335,8 +1341,10 @@ class SmartZip
             this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
         cap := this.RunCmdCapture(cmd, "UTF-8")
         result := Classify7zResult("test", cap.exitCode, cap.output, path)
-        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
+        if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING) {
             result.passwordUsed := password
+            result.testVerified := true
+        }
         return result
     }
 
