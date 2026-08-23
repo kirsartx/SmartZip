@@ -837,6 +837,9 @@ Describe 'PasswordPreflightSafety' {
         (Test-Regex -Text $u -Pattern 'testVerified') | Should Be $true
         (Test-Regex -Text $u -Pattern 'tr\s*:=\s*resolved') | Should Be $true
         (Test-Regex -Text $u -Pattern 'TestArchive\s*\(\s*path\s*,\s*resolved\.passwordUsed\s*\)') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'preProbe\.HasOwnProp\("status"\)') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'preProbe\.HasOwnProp\("stage"\).*?preProbe\.stage\s*=\s*"probe"') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'preProbe\.HasOwnProp\("archivePath"\)') | Should Be $true
         # Legacy early-kill encrypted probe callback must no longer be the primary entry
         (Test-Regex -Text $u -Pattern 'CheckEncrypted') | Should Be $false
     }

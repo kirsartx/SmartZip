@@ -79,6 +79,15 @@ function New-NestingMigrationProductHost {
         throw 'product UnZipNesting must call IsNestedArchiveCandidate'
     }
 
+    $preProbeDecision = $null
+    $mPreProbe = [regex]::Match($unzipBody,
+        '(?ms)(^ {12}if \(IsObject\(preProbe\).*?^ {16}probe := this\.ProbeArchive\(path\))')
+    if (-not $mPreProbe.Success) {
+        throw 'product zipx preProbe decision branch missing'
+    }
+    $preProbeDecision = $mPreProbe.Groups[1].Value
+    Assert-ExactlyOneOccurrence $preProbeDecision 'preProbe fallback' 'this\.ProbeArchive\(path\)'
+
     $zipxForce = $null
     $mForce = [regex]::Match($unzipBody, '(?s)(; test=0 still forces[^\r\n]*\r?\n.*?if \(nestedMayRecycle && extractResult\.isCleanSuccess && !volume\.isVolume && FileExist\(path\)\)\s*\r?\n\s*this\.RecycleItem\(path, A_LineNumber, false\))')
     if (-not $mForce.Success) {
@@ -110,6 +119,15 @@ function New-NestingMigrationProductHost {
     # Convert nested helper into a class method (same body, 4-space class indent).
     $nestMethod = $unZipNestingBody -replace '(?m)^        ', '    '
     $nestMethod = $nestMethod -replace 'UnZipNesting\s*\(', 'UnZipNesting('
+
+    # Convert the exact zipx preProbe branch into a callable host method.
+    $preProbeMethodBody = $preProbeDecision -replace '(?m)^ {4}', ''
+    $preProbeMethod = @"
+    SelectProbe(path, preProbe := "") {
+$preProbeMethodBody
+        return probe
+    }
+"@
 
     $header = @'
 #Requires AutoHotkey v2.0
@@ -161,6 +179,7 @@ class NestingProductHost {
     exitCode := -1
     callOrder := []
     lastPreProbe := ""
+    probeCalls := 0
     scriptedProbeStatus := ArchiveStatus.OK
     siblingOverride := unset
     recycled := []
@@ -171,6 +190,7 @@ class NestingProductHost {
     Reset() {
         this.callOrder := []
         this.lastPreProbe := ""
+        this.probeCalls := 0
         this.recycled := []
         this.exitCode := -1
         this.scriptedProbeStatus := ArchiveStatus.OK
@@ -178,6 +198,7 @@ class NestingProductHost {
     }
 
     ProbeArchive(path) {
+        this.probeCalls++
         this.callOrder.Push("probe")
         return ArchiveResult(this.scriptedProbeStatus, "probe", 0, path)
     }
@@ -332,8 +353,31 @@ okPreProbe := host.lastPreProbe
 orderBad := RunNestedOrder(host, nestZip, "zip", ArchiveStatus.NOT_ARCHIVE)
 okOrder := (orderOk.Length = 3 && orderOk[1] = "candidate" && orderOk[2] = "probe" && orderOk[3] = "unzip")
 badOrder := (orderBad.Length = 2 && orderBad[1] = "candidate" && orderBad[2] = "probe")
+
+currentPath := StrLower(nestZip)
+validProbe := ArchiveResult(ArchiveStatus.OK, "probe", 0, StrUpper(nestZip))
+host.probeCalls := 0
+validSelected := host.SelectProbe(currentPath, validProbe)
+validReuse := (ObjPtr(validSelected) = ObjPtr(validProbe) && host.probeCalls = 0)
+
+mismatchedProbe := ArchiveResult(ArchiveStatus.OK, "probe", 0, nestZip ".other")
+host.probeCalls := 0
+mismatchSelected := host.SelectProbe(currentPath, mismatchedProbe)
+mismatchFallback := (host.probeCalls = 1
+    && ObjPtr(mismatchSelected) != ObjPtr(mismatchedProbe)
+    && mismatchSelected.archivePath = currentPath)
+
+invalidMatching := { archivePath: currentPath }
+host.probeCalls := 0
+invalidSelected := host.SelectProbe(currentPath, invalidMatching)
+invalidFallback := (host.probeCalls = 1
+    && ObjPtr(invalidSelected) != ObjPtr(invalidMatching)
+    && invalidSelected.archivePath = currentPath)
+
 AssertTrue(okOrder && badOrder && IsObject(okPreProbe)
-    && okPreProbe.archivePath = nestZip, "nested_requires_probe_stage_before_extract")
+    && okPreProbe.archivePath = nestZip
+    && validReuse && mismatchFallback && invalidFallback,
+    "nested_requires_probe_stage_before_extract")
 
 summary := "SUMMARY passed=" passCount " failed=" failCount
 lines.Push(summary)
@@ -346,6 +390,7 @@ ExitApp(failCount > 0 ? 1 : 0)
 '@
 
     $full = $header + $classOpen + "`n" + $isArchiveMethod + "`n" + $nestedCandidateMethod + "`n" +
+        $preProbeMethod + "`n" +
         $classMid + "`n" + $nestMethod + "`n" + $classClose + "`n" + $migrateFn + "`n" + $footer
 
     # Product IsNestedArchiveCandidate lists siblings from disk — OK for our temp files.

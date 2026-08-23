@@ -29,6 +29,9 @@ Optimize extraction speed without behavior changes by reusing already-successful
 
 - `SmartZip.ahk`
 - `tests/SmartZip.Static.Tests.ps1`
+- `tests/PasswordPreflight.Tests.ps1`
+- `tests/PasswordPreflight.Harness.ahk`
+- `tests/NestingMigration.Tests.ps1`
 - `docs/continuity/ACTIVE_TASK.md`
 - `docs/continuity/DECISIONS.md`
 

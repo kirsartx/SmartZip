@@ -449,7 +449,10 @@ class SmartZip
                 path := volume.firstPath
             }
 
-            if (IsObject(preProbe) && preProbe.HasOwnProp("archivePath")
+            if (IsObject(preProbe)
+                && preProbe.HasOwnProp("status")
+                && preProbe.HasOwnProp("stage") && preProbe.stage = "probe"
+                && preProbe.HasOwnProp("archivePath")
                 && preProbe.archivePath != ""
                 && StrLower(preProbe.archivePath) = StrLower(path))
                 probe := preProbe
