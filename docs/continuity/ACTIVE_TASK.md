@@ -11,7 +11,7 @@ Optimize extraction speed without behavior changes by reusing already-successful
 ## Current Git State
 
 - Branch: `agent/diagnostic-ui-contract-repair`.
-- Final optimization verification HEAD before this continuity-only handoff commit: `38ed0c1` (`test: align static matchers with extraction handoffs`).
+- Final optimization verification HEAD: `a11fbe5` (`test: harden extraction handoff fallbacks`).
 - Final optimization-gate `git status --short`: exit 0 with empty output (clean).
 
 ## Completed
@@ -19,6 +19,7 @@ Optimize extraction speed without behavior changes by reusing already-successful
 - `6cd7eca` (`perf: reuse validated password test results`) marks successful `TestArchive` results and reuses them in the same synchronous extraction pipeline only when the non-empty result `archivePath` matches the current normalized path case-insensitively; otherwise the original test path runs.
 - `901ceca` (`perf: reuse nested archive probe results`) passes the probe computed by `UnZipNesting` only into the immediately following `Unzip` call and reuses it after volume normalization only for the same non-empty archive path; otherwise the original probe path runs.
 - `38ed0c1` (`test: align static matchers with extraction handoffs`) updates only the stale static-test matchers for the new `zipx` signature and call shape. This corrected the initial static result of 182 passed / 2 failed to 184/184 without changing production behavior.
+- `a11fbe5` (`test: harden extraction handoff fallbacks`) requires a valid probe-shaped object before nested probe reuse, adds executable same-path/mismatch/invalid fallback call-count coverage for both handoffs, and records all affected test/harness files.
 - The approved optimization is complete. It preserves the final post-extract `7z t` and all existing password, volume, isolation, source-recycle, nesting, status, error, and result behavior.
 
 ## Remaining
@@ -41,8 +42,9 @@ Optimize extraction speed without behavior changes by reusing already-successful
 - Two measured Real7Zip integration runs: 36/36 at 101305 ms and 36/36 at 99524 ms.
 - `git diff --check`: exit 0.
 - 7-Zip probe: `7-Zip 26.02 ZS v1.5.7 R1 (x64)`.
-- Final optimization verification HEAD: `38ed0c1`.
+- Final optimization verification HEAD: `a11fbe5`.
 - Final optimization-gate `git status --short`: exit 0 with empty output (clean).
+- Fresh final full gate after `a11fbe5`: Real7Zip.Integration 36/36 in 96.31 seconds; all eight suites passed 648/648.
 - Tests not run: none; all eight suites in the documented full contract gate ran.
 - No secrets, passwords, session IDs, or raw logs are recorded in this handoff.
 

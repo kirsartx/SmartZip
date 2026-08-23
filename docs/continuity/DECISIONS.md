@@ -23,7 +23,7 @@ The `DiagnosticUIHost` test double mirrors production `IsArchive` semantics: `Sp
 ## Extraction Speed Result Handoffs
 
 - Reuse a successful `TestArchive` result only within the same synchronous extraction pipeline. Reuse requires the result to be test-verified and its own non-empty `archivePath` to match the current normalized archive path case-insensitively; every mismatch or unverified result follows the existing `TestArchive` path.
-- Reuse a nested archive probe only as the immediate precomputed probe passed from `UnZipNesting` to the following `Unzip`. After volume normalization, a missing, empty, invalid, or path-mismatched probe follows the existing `ProbeArchive` path.
+- Reuse a nested archive probe only as the immediate precomputed probe passed from `UnZipNesting` to the following `Unzip`. After volume normalization, reuse requires own `status`, own `stage = "probe"`, and a non-empty path-matching `archivePath`; a missing, empty, invalid, or path-mismatched probe follows the existing `ProbeArchive` path.
 - Preserve the final post-extract `7z t` and all existing password, volume, isolation, source-recycle, nesting, status, error, and result behavior.
 - Do not add a cross-run cache, concurrency, 7-Zip parameter tuning, GUI or CLI changes, or production hooks for this optimization.
 - Do not record secrets, passwords, session IDs, or raw logs in continuity records.
