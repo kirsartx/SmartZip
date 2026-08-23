@@ -1652,7 +1652,7 @@ Describe 'Kirs4ZipxOutcomeContract' {
 
     It 'zipx has no bare return on any terminal path' {
         $zipxBody = Get-SourceSlice -Source $script:UnzipBody `
-            -StartMarker "`n        zipx(path)" -EndMarker "`n        ;解压嵌套"
+            -StartMarker "`n        zipx(path, preProbe := `"`")" -EndMarker "`n        ;解压嵌套"
         [string]::IsNullOrEmpty($zipxBody) | Should Be $false
 
         # A bare return yields no ArchiveResult. Scan the entire zipx body so future
@@ -1674,11 +1674,11 @@ Describe 'Kirs4ZipxOutcomeContract' {
     It 'quarantine_failed cannot reach destination naming or MoveItem' {
         $u = $script:UnzipBody
         $gate = [regex]::Match($u,
-            '(?s)zipResult\s*:=\s*zipx\(i\).*?if\s*\(\s*zipResult\.outputState\s*!=\s*["'']usable["'']\s*\)\s*\r?\n\s*continue')
+            '(?s)zipResult\s*:=\s*zipx\(i,\s*preProbe\).*?if\s*\(\s*zipResult\.outputState\s*!=\s*["'']usable["'']\s*\)\s*\r?\n\s*continue')
         $gate.Success | Should Be $true
 
         $promotionPath = [regex]::Match($u,
-            '(?s)zipResult\s*:=\s*zipx\(i\).*?outputState\s*!=\s*["'']usable["''].*?continue.*?this\.MoveItem\(')
+            '(?s)zipResult\s*:=\s*zipx\(i,\s*preProbe\).*?outputState\s*!=\s*["'']usable["''].*?continue.*?this\.MoveItem\(')
         $promotionPath.Success | Should Be $true
     }
 
