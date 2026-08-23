@@ -249,7 +249,7 @@ class SmartZip
             ExitApp
     }
 
-    Unzip(loopPath := "")
+    Unzip(loopPath := "", preProbe := "")
     {
         isBatch := this.muilt
         if !loopPath
@@ -320,7 +320,7 @@ class SmartZip
 
             if this.addDir2Pass
                 SplitPath(i, , &dir), this.password.Push(RegExReplace(dir, ".+\\"))
-            zipResult := zipx(i)
+            zipResult := zipx(i, preProbe)
             if this.addDir2Pass
                 this.password.RemoveAt(this.password.Length)
 
@@ -414,7 +414,7 @@ class SmartZip
             PasswordSort
 
         ;执行解压
-        zipx(path)
+        zipx(path, preProbe := "")
         {
             if this.logLevel
                 this.log .= '`n#####`n' path '`n'
@@ -449,7 +449,12 @@ class SmartZip
                 path := volume.firstPath
             }
 
-            probe := this.ProbeArchive(path)
+            if (IsObject(preProbe) && preProbe.HasOwnProp("archivePath")
+                && preProbe.archivePath != ""
+                && StrLower(preProbe.archivePath) = StrLower(path))
+                probe := preProbe
+            else
+                probe := this.ProbeArchive(path)
             if volume.isVolume
                 probe.volumeFirst := volume.firstPath
             if this.logLevel
@@ -614,7 +619,7 @@ class SmartZip
             }
 
             this.exitCode := -1
-            this.Unzip(path)
+            this.Unzip(path, probe)
             this.Loging("解压嵌套 <--> " path, A_LineNumber)
             ; Nested source recycle only after nested clean OK — Task 5 zipx.
             ; Never handle it here on warning/failure/volume, and never permanently delete a source.
