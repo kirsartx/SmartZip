@@ -1,5 +1,69 @@
 # Active Task
 
+## Current Handoff — 2026-09-17
+
+- Goal: continue extraction-speed work without changing existing outcomes, and
+  support HaoZip-style SFXV sets consisting of one `.exe` plus numbered
+  `.NNN.sfxv` pieces.
+- Completed: SFXV members are recognized from any selected piece; the first
+  executable and every numbered piece are checked in order; missing pieces
+  return `MISSING_VOLUME`. When complete, the executable's embedded 7z
+  signature is located, the self-extractor stub is skipped, and the remaining
+  bytes are merged into a temporary regular `.7z` file for 7-Zip. Original
+  pieces are never modified or deleted, temporary files are cleaned
+  idempotently, and result identity remains the original first `.exe` path.
+  The earlier stdin feeder experiment was removed after the tested 7-Zip
+  engine reported 7z stdin input as unsupported.
+- Instrumentation: opt-in `timingLog=0` records only `probe`, `test`, and
+  `extract` durations; it is disabled by default.
+- Changed files: `SmartZip.ahk`, `lib/ArchiveDiagnostics.ahk`, `README.md`, `ini.md`,
+  `tests/Sfxv.Tests.ps1`, `tests/Sfxv.Integration.Tests.ps1`, `tests/README.md`,
+  this file, and `docs/continuity/DECISIONS.md`. Existing directory-scan
+  changes remain in the same working tree.
+- Verification: full documented gate plus directory-scan and SFXV suites
+  passed `686/686`, 0 failed. This includes the original `648/648`, directory
+  scan `1/1`, SFXV recognition `1/1`, and SFXV real 7-Zip integration `36/36`.
+  `git diff --check` exited 0. The SFXV integration uses data-only fixtures
+  and never executes an archive EXE.
++- Deployment: final source compiled successfully with the staged AutoHotkey
++  toolchain and installed as `C:\Tool\SmartZip\SmartZip.exe`. The deployed SHA-256 is
+  `C9EF0553D7FB4013B6233C60C6E0C6D20D0C2F139326573112061B43273FBEA3`; it
+  matches the final temporary build. Existing executables were backed up as
+  `C:\Tool\SmartZip\SmartZip.exe.bak-codex-20260917-033601` and
+  `C:\Tool\SmartZip\SmartZip.exe.bak-codex-pre-final-20260917-033629`.
+- Remaining: no implementation work is pending for this SFXV adaptation.
+- Next verification: rerun the exact gate in `tests/README.md` if source
+  changes continue; otherwise inspect `git diff --stat` and the final status.
+
+## Current Handoff — 2026-09-16
+
+- Goal: preserve extraction behavior while reducing directory scan overhead.
+- Completed: AfterUnzip stops its non-empty scan at the first child; a shared
+  conservative filename gate avoids sibling enumeration and volume-index building
+  for impossible volume names. Custom nested extension rules remain first.
+- Baseline HEAD: de80a38. Changes are in the working tree for review.
+- Changed files: SmartZip.ahk, lib/ArchiveDiagnostics.ahk,
+  tests/DirectoryScanOptimization.Tests.ps1, tests/README.md, this file,
+  docs/continuity/DECISIONS.md, and
+  docs/superpowers/specs/2026-09-16-directory-scan-design.md.
+- Verification: Invoke-Pester -Script './tests/DirectoryScanOptimization.Tests.ps1'
+  -PassThru passed 1/1, executing 120 comparisons against de80a38.
+- The existing gate's first seven suites passed 184, 193, 15, 98, 39, 30, 53
+  respectively (612/612). Integration initially blocked at Ahk2Exe: its /base
+  argument contained an unquoted Program Files path. Stopped only the owned test
+  runner/compiler and staged the installed toolchain in the supported TEMP
+  ahk_tools directories. No repository toolchain configuration changed.
+- Invoke-Pester -Script './tests/Real7Zip.Integration.Tests.ps1' -PassThru then
+  passed 36/36 in 93.8 seconds, exit 0. Total verified: 649/649 including the new
+  regression. These are test durations, not measured extraction speed gains.
+- git diff --check: exit 0. Generated RunCmdCapture fragment formatting was
+  restored and the generated PasswordPreflight fragment removed.
+- Remaining: no implementation work; optional matched performance benchmark.
+- Next verification: the eight-suite command below, followed by the additional
+  DirectoryScanOptimization test documented in tests/README.md.
+
+## Previous Optimization Handoff (Historical)
+
 ## Purpose
 
 Maintain a portable handoff state so Codex and EchoBird can continue SmartZip work in separate new conversations.

@@ -27,3 +27,29 @@ The `DiagnosticUIHost` test double mirrors production `IsArchive` semantics: `Sp
 - Preserve the final post-extract `7z t` and all existing password, volume, isolation, source-recycle, nesting, status, error, and result behavior.
 - Do not add a cross-run cache, concurrency, 7-Zip parameter tuning, GUI or CLI changes, or production hooks for this optimization.
 - Do not record secrets, passwords, session IDs, or raw logs in continuity records.
+
+## Directory Scan Optimization (2026-09-16)
+
+- Use one conservative filename predicate for the existing RAR, rNN and numeric
+  volume patterns before gathering sibling names or constructing volume indexes.
+  The predicate is not volume evidence; DetectVolumeGroup still determines the group.
+- Custom archive extension/regex checks run before the nested candidate rejection.
+- Empty-directory detection stops on its first child; source handling and final
+  integrity verification are unchanged. No directory cache is introduced.
+
+## SFXV Compatibility (2026-09-17)
+
+- Treat `.exe` plus `.001.sfxv`, `.002.sfxv`, and later pieces as a distinct
+  byte-split self-extracting format. Do not reinterpret it as an ordinary
+  `.7z.001` set or rename the source pieces.
+- The tested 7-Zip Zstandard engine does not accept a 7z archive from stdin,
+  so the production-compatible path is a sequential temporary merge after
+  removing the first executable's SFX stub. The source files remain untouched;
+  cleanup is best-effort and idempotent.
+- SFXV operations preserve the first executable as `archivePath` for result
+  identity, status reporting, and source-protection rules. Missing pieces fail
+  before materialization. The temporary merge needs free space approximately
+  equal to the archive payload.
+- Operation timing is opt-in through `timingLog=0` and writes only fixed
+  operation names plus duration values; no paths, passwords, or raw output are
+  recorded.

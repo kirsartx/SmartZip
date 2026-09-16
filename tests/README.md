@@ -45,6 +45,30 @@ The final review adds two executable warning-token assertions and fifteen execut
 
 ## Real-7-Zip integration suite
 
+### Directory-scan optimization regression
+
+Run `Invoke-Pester -Script '.\tests\DirectoryScanOptimization.Tests.ps1' -PassThru`
+in addition to the eight-suite gate. Expected: 1 passed, 0 failed. This runs 120
+volume-detection comparisons against commit `de80a38` (requires local Git history),
+including plain files, numeric evidence, missing volumes, old RAR and case variants.
+The existing eight-suite total stays 648; with this regression the total is 649.
+
+### SFXV self-extracting split regression
+
+Run the following in addition to the contract gate:
+
+```powershell
+Invoke-Pester -Script './tests/Sfxv.Tests.ps1' -PassThru
+Invoke-Pester -Script './tests/Sfxv.Integration.Tests.ps1' -PassThru
+```
+
+Expected: `Sfxv.Tests.ps1` 1/1 and `Sfxv.Integration.Tests.ps1` 36/36.
+The integration suite creates data-only MZ/SFXV fixtures, strips the self-extractor
+stub into a temporary regular 7z stream, and verifies plain, encrypted, warning,
+missing-volume, cleanup, and timing behavior. It never executes an archive EXE.
+The extra temporary file requires free space roughly equal to the archive payload;
+the original SFXV volumes are never modified or deleted.
+
 | File | Role |
 |---|---|
 | `New-ExtractionReliabilityFixtures.ps1` | Deterministic fixtures via real `7z.exe`; process-only `SMARTZIP_FIXTURE_PASSWORD` |

@@ -136,6 +136,7 @@ class SmartZip
         this.logLevel := ini.logLevel
 
         this.cmdLog := ini.cmdLog
+        this.timingLog := ini.timingLog
         this.hideRunSize := ini.hideRunSize
 
         if this.logLevel || this.cmdLog
@@ -424,8 +425,10 @@ class SmartZip
 
             SplitPath(path, &selectedName, &selectedDir)
             siblingNames := []
-            loop files selectedDir "\*.*", "F"
-                siblingNames.Push(A_LoopFileName)
+            if IsVolumeNameCandidate(path) {
+                loop files selectedDir "\*.*", "F"
+                    siblingNames.Push(A_LoopFileName)
+            }
             volume := DetectVolumeGroup(path, siblingNames)
             if volume.isVolume {
                 key := StrLower(volume.firstPath)
@@ -601,7 +604,7 @@ class SmartZip
 
             SplitPath(path, &name, &dir)
             siblingNames := []
-            if DirExist(dir) {
+            if (IsVolumeNameCandidate(path) && DirExist(dir)) {
                 loop files dir "\*.*", "F"
                     siblingNames.Push(A_LoopFileName)
             }
@@ -647,8 +650,10 @@ class SmartZip
             isDir := DirExist(path)
             folderEmpty := true
             if isDir {
-                loop files path "\*.*", "DF"
+                loop files path "\*.*", "DF" {
                     folderEmpty := false
+                    break
+                }
             }
             if isDir && folderEmpty	;空文件夹
                 return this.RecycleItem(path, A_LineNumber)
@@ -1297,6 +1302,9 @@ class SmartZip
         if this.IsArchive(ext)
             return true
 
+        if !IsVolumeNameCandidate(path)
+            return false
+
         SplitPath(path, &name, &dir)
         siblingNames := []
         if DirExist(dir) {
@@ -1308,13 +1316,26 @@ class SmartZip
     }
 
     ProbeArchive(path) {
+        timingStarted := A_TickCount
+        input := SfxvInput(path)
+        if (input.status != "") {
+            result := ArchiveResult(input.status, "probe", 2, path)
+            result.volumeFirst := input.volumeFirst
+            result.missingVolumes := input.missingVolumes
+            input.Close()
+            WriteOperationTiming(this, "probe", timingStarted)
+            return result
+        }
+        commandPath := input.commandPath
+        archivePath := input.volumeFirst != "" ? input.volumeFirst : path
+        try {
         ; Always pass empty -p so 7-Zip ZS does not block on encrypted-header password prompts
         ; when RunCmdCapture has no stdin (CREATE_NO_WINDOW). Matches TestArchive empty-password shape.
-        cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' path '"'
+        cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' commandPath '"'
         if this.cmdLog
             this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
         cap := this.RunCmdCapture(cmd, "UTF-8")
-        result := Classify7zResult("probe", cap.exitCode, cap.output, path)
+        result := Classify7zResult("probe", cap.exitCode, cap.output, archivePath)
 
         ; Some damaged/partial 7z packages report "not archive" on list, but still yield a more
         ; specific diagnosis on test (header corrupt / truncated / password). Prefer that signal
@@ -1322,11 +1343,11 @@ class SmartZip
         if (result.status = ArchiveStatus.NOT_ARCHIVE) {
             SplitPath(path, , , &ext)
             if (ext != "" && this.IsArchive(ext)) {
-                tcmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' path '"'
+                tcmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' commandPath '"'
                 if this.cmdLog
                     this.testLog .= '`n#####`n' RedactDiagnostic(tcmd) '`n'
                 tcap := this.RunCmdCapture(tcmd, "UTF-8")
-                tretry := Classify7zResult("probe", tcap.exitCode, tcap.output, path)
+                tretry := Classify7zResult("probe", tcap.exitCode, tcap.output, archivePath)
                 if (tretry.status = ArchiveStatus.HEADER_CORRUPT
                     || tretry.status = ArchiveStatus.TRUNCATED
                     || tretry.status = ArchiveStatus.DATA_CORRUPT
@@ -1341,19 +1362,40 @@ class SmartZip
             }
         }
         return result
+        } finally {
+            input.Close()
+            WriteOperationTiming(this, "probe", timingStarted)
+        }
     }
 
     TestArchive(path, password := "") {
-        cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
+        timingStarted := A_TickCount
+        input := SfxvInput(path)
+        if (input.status != "") {
+            result := ArchiveResult(input.status, "test", 2, path)
+            result.volumeFirst := input.volumeFirst
+            result.missingVolumes := input.missingVolumes
+            input.Close()
+            WriteOperationTiming(this, "test", timingStarted)
+            return result
+        }
+        commandPath := input.commandPath
+        archivePath := input.volumeFirst != "" ? input.volumeFirst : path
+        try {
+        cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' commandPath '"'
         if this.cmdLog
             this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
         cap := this.RunCmdCapture(cmd, "UTF-8")
-        result := Classify7zResult("test", cap.exitCode, cap.output, path)
+        result := Classify7zResult("test", cap.exitCode, cap.output, archivePath)
         if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING) {
             result.passwordUsed := password
             result.testVerified := true
         }
         return result
+        } finally {
+            input.Close()
+            WriteOperationTiming(this, "test", timingStarted)
+        }
     }
 
     BuildPasswordCandidates(path) {
@@ -1563,6 +1605,20 @@ class SmartZip
     }
 
     ExtractArchiveToTemp(path, password, tempDir) {
+        timingStarted := A_TickCount
+        input := SfxvInput(path)
+        if (input.status != "") {
+            result := ArchiveResult(input.status, "extract", 2, path)
+            result.volumeFirst := input.volumeFirst
+            result.missingVolumes := input.missingVolumes
+            result.tempOutputDir := tempDir
+            input.Close()
+            WriteOperationTiming(this, "extract", timingStarted)
+            return result
+        }
+        commandPath := input.commandPath
+        archivePath := input.volumeFirst != "" ? input.volumeFirst : path
+        try {
         pass := ""
         if (password != "")
             pass := ' -p"' password '"'
@@ -1571,26 +1627,26 @@ class SmartZip
         catch
             hideBool := false
 
-        this.Run7z(hideBool, 'x', path, '" -aou -o' tempDir pass this.excludeArgs this.codePage,
+        this.Run7z(hideBool, 'x', commandPath, '" -aou -o' tempDir pass this.excludeArgs this.codePage,
             hideBool || this.guiShow, true, A_LineNumber)
-
         extractExit := this.exitCode
+
         result := ""
         if (extractExit = 255) {
-            result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, path)
+            result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, archivePath)
         } else {
             ; Follow-up console test is a different process. Use its text for hard-error detail
             ; and for exit-0 warning detection, but never promote GUI exit 1 to OK_WITH_WARNING
             ; solely because the later test printed warning evidence.
-            cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' path '"'
+            cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' commandPath '"'
             cap := this.RunCmdCapture(cmd, "UTF-8")
             if this.cmdLog
                 this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
             if (extractExit = 1) {
                 ; No GUI extract stdout capture available: exit 1 remains failure.
                 ; Classify with empty extract text first so t-warning text cannot invent success.
-                result := Classify7zResult("extract", extractExit, "", path)
-                detail := Classify7zResult("extract", extractExit, cap.output, path)
+                result := Classify7zResult("extract", extractExit, "", archivePath)
+                detail := Classify7zResult("extract", extractExit, cap.output, archivePath)
                 if (detail.status != ArchiveStatus.OK && detail.status != ArchiveStatus.OK_WITH_WARNING) {
                     result := detail
                     result.exitCode := extractExit
@@ -1612,7 +1668,7 @@ class SmartZip
                     result.output := detail.output
                 }
             } else {
-                result := Classify7zResult("extract", extractExit, cap.output, path)
+                result := Classify7zResult("extract", extractExit, cap.output, archivePath)
                 result.exitCode := extractExit
             }
         }
@@ -1622,6 +1678,10 @@ class SmartZip
         result.isCleanSuccess := (result.status = ArchiveStatus.OK && result.exitCode = 0)
         result.mayDeleteSource := result.isCleanSuccess
         return result
+        } finally {
+            input.Close()
+            WriteOperationTiming(this, "extract", timingStarted)
+        }
     }
 
     FinalizeExtraction(path, result, tempDir, targetDir, mayDeleteSource) {
@@ -2818,7 +2878,8 @@ class ini
             nestingMuilt: [0, "set"],
             hideRunSize: [0x7FFFFFFFFFFFFFFF, "set"],
             cmdLog: [0, "set"],
-            dynamicPassSort: [0, "set"],
+            timingLog: [0, "set"],
+             dynamicPassSort: [0, "set"],
             test: [0, "set"],
             partSkip: [0, "set"],
             autoRemovePass: [0, "set"],
@@ -3022,6 +3083,7 @@ IniCreate()
         ini.setWrite("successPercent", 90)
         ini.setWrite("logLevel", 0)
         ini.setWrite("cmdLog", 0)
+        ini.setWrite("timingLog", 0)
         ini.setWrite("openOutputDir", 0)
         ini.setWrite("hideRunSize", 10)
 
