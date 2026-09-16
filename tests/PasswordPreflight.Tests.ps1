@@ -47,6 +47,23 @@ function Export-PasswordPreflightFragment {
         throw "Password preflight methods not found in SmartZip.ahk (ProbeArchive..RunCmdCapture)"
     }
     $method = $body.TrimStart("`r", "`n")
+
+    $unzipBody = Get-SourceSlice -Source $src -StartMarker "`n    Unzip(loopPath" -EndMarker "`n    OpenZip()"
+    if ([string]::IsNullOrEmpty($unzipBody)) {
+        throw 'product Unzip body missing for validated TestArchive decision extraction'
+    }
+    $testDecisionMatches = [regex]::Matches($unzipBody,
+        '(?ms)(^ {20}tr := ""\r?\n^ {20}if \(resolved\.HasOwnProp\("testVerified"\).*?^ {24}tr := this\.TestArchive\(path, resolved\.passwordUsed\))')
+    if ($testDecisionMatches.Count -ne 1) {
+        throw "expected exactly one validated TestArchive decision branch, found $($testDecisionMatches.Count)"
+    }
+    $testDecisionBody = $testDecisionMatches[0].Groups[1].Value -replace '(?m)^ {12}', ''
+    $testDecisionMethod = @"
+    SelectTestResult(path, resolved) {
+$testDecisionBody
+        return tr
+    }
+"@
     $fragment = @"
 #Requires AutoHotkey v2.0
 
@@ -390,6 +407,8 @@ class PasswordPreflightHost {
     }
 
 $productMethods
+
+$testDecisionMethod
 
 }
 

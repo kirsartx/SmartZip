@@ -367,8 +367,32 @@ AssertEq(gotZipWrong.status, ArchiveStatus.WRONG_PASSWORD, "resolve_content_encr
 ; Restore clean capture path for TestArchive product classification assertions
 host.ResetPasswordState()
 host.scriptedCapture := { exitCode: 0, output: "Everything is Ok`n", cancelled: false }
+
+decisionPath := "C:\\handoff\\archive.7z"
+validTest := ArchiveResult(ArchiveStatus.OK, "test", 0, "c:\\HANDOFF\\ARCHIVE.7Z", "Everything is Ok`n")
+validTest.passwordUsed := "pw"
+validTest.testVerified := true
+host.testCalls := 0
+validSelected := host.SelectTestResult(decisionPath, validTest)
+validTestReuse := (ObjPtr(validSelected) = ObjPtr(validTest) && host.testCalls = 0)
+
+mismatchedTest := ArchiveResult(ArchiveStatus.OK, "test", 0, "C:\\other\\archive.7z", "Everything is Ok`n")
+mismatchedTest.passwordUsed := "pw"
+mismatchedTest.testVerified := true
+host.testCalls := 0
+mismatchSelected := host.SelectTestResult(decisionPath, mismatchedTest)
+mismatchTestFallback := (host.testCalls = 1 && ObjPtr(mismatchSelected) != ObjPtr(mismatchedTest))
+
+unverifiedTest := ArchiveResult(ArchiveStatus.OK, "test", 0, decisionPath, "Everything is Ok`n")
+unverifiedTest.passwordUsed := "pw"
+host.testCalls := 0
+unverifiedSelected := host.SelectTestResult(decisionPath, unverifiedTest)
+unverifiedTestFallback := (host.testCalls = 1 && ObjPtr(unverifiedSelected) != ObjPtr(unverifiedTest))
+
 tr := host.TestArchive("C:\\enc.7z", "pw")
-AssertEq(tr.status, ArchiveStatus.OK, "test_classifies_ok")
+AssertTrue(tr.status = ArchiveStatus.OK && validTestReuse
+    && mismatchTestFallback && unverifiedTestFallback,
+    "test_classifies_ok")
 AssertEq(tr.stage, "test", "test_stage_name")
 AssertEq(tr.passwordUsed, "pw", "test_sets_password_used_on_ok")
 AssertContains(host.lastTestCmd, " t ", "test_cmd_uses_t")

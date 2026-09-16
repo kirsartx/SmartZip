@@ -787,6 +787,7 @@ Describe 'PasswordPreflightSafety' {
         (Test-Regex -Text $b -Pattern '(?m)\bt\b.*-bso1|-bso1.*\bt\b| '' t ') | Should Be $true
         (Test-Regex -Text $b -Pattern '-p"') | Should Be $true
         (Test-Regex -Text $b -Pattern 'passwordUsed') | Should Be $true
+        (Test-Regex -Text $b -Pattern 'result\.testVerified\s*:=\s*true') | Should Be $true
     }
 
     It 'cmdLog paths redact diagnostics and never concatenate raw password into log' {
@@ -833,6 +834,12 @@ Describe 'PasswordPreflightSafety' {
         $u = $script:UnzipBody
         (Test-Regex -Text $u -Pattern 'ProbeArchive\s*\(') | Should Be $true
         (Test-Regex -Text $u -Pattern 'ResolveArchivePassword\s*\(') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'testVerified') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'tr\s*:=\s*resolved') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'TestArchive\s*\(\s*path\s*,\s*resolved\.passwordUsed\s*\)') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'preProbe\.HasOwnProp\("status"\)') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'preProbe\.HasOwnProp\("stage"\).*?preProbe\.stage\s*=\s*"probe"') | Should Be $true
+        (Test-Regex -Text $u -Pattern 'preProbe\.HasOwnProp\("archivePath"\)') | Should Be $true
         # Legacy early-kill encrypted probe callback must no longer be the primary entry
         (Test-Regex -Text $u -Pattern 'CheckEncrypted') | Should Be $false
     }
@@ -1648,7 +1655,7 @@ Describe 'Kirs4ZipxOutcomeContract' {
 
     It 'zipx has no bare return on any terminal path' {
         $zipxBody = Get-SourceSlice -Source $script:UnzipBody `
-            -StartMarker "`n        zipx(path)" -EndMarker "`n        ;解压嵌套"
+            -StartMarker "`n        zipx(path, preProbe := `"`")" -EndMarker "`n        ;解压嵌套"
         [string]::IsNullOrEmpty($zipxBody) | Should Be $false
 
         # A bare return yields no ArchiveResult. Scan the entire zipx body so future
@@ -1670,11 +1677,11 @@ Describe 'Kirs4ZipxOutcomeContract' {
     It 'quarantine_failed cannot reach destination naming or MoveItem' {
         $u = $script:UnzipBody
         $gate = [regex]::Match($u,
-            '(?s)zipResult\s*:=\s*zipx\(i\).*?if\s*\(\s*zipResult\.outputState\s*!=\s*["'']usable["'']\s*\)\s*\r?\n\s*continue')
+            '(?s)zipResult\s*:=\s*zipx\(i,\s*preProbe\).*?if\s*\(\s*zipResult\.outputState\s*!=\s*["'']usable["'']\s*\)\s*\r?\n\s*continue')
         $gate.Success | Should Be $true
 
         $promotionPath = [regex]::Match($u,
-            '(?s)zipResult\s*:=\s*zipx\(i\).*?outputState\s*!=\s*["'']usable["''].*?continue.*?this\.MoveItem\(')
+            '(?s)zipResult\s*:=\s*zipx\(i,\s*preProbe\).*?outputState\s*!=\s*["'']usable["''].*?continue.*?this\.MoveItem\(')
         $promotionPath.Success | Should Be $true
     }
 

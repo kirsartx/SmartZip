@@ -1,5 +1,5 @@
-; Pure archive diagnostics for SmartZip (compile-time include only).
-; No UI, no process launch, no file I/O side effects.
+; Archive diagnostics and explicitly scoped split-input I/O for SmartZip.
+; Including this file has no side effects; no archive executable is ever launched.
 #Requires AutoHotkey v2.0
 
 class ArchiveStatus {
@@ -212,6 +212,13 @@ _VolHasPatternDEvidence(stem, selIndex, indices) {
     return false
 }
 
+; Conservative filename gate for every supported volume pattern. This is only a
+; candidate check: numeric suffixes still need DetectVolumeGroup's evidence.
+IsVolumeNameCandidate(path) {
+    SplitPath(path, &name)
+    return RegExMatch(name, "i)^.+\.(?:rar|r\d{2}|\d+|exe|\d{3}\.sfxv)$") != 0
+}
+
 DetectVolumeGroup(path, siblingNames) {
     empty := { isVolume: false, firstPath: "", members: [], missingVolumes: [], selectedIsFirst: false }
     if (path = "")
@@ -219,6 +226,9 @@ DetectVolumeGroup(path, siblingNames) {
 
     SplitPath(path, &selName, &dir)
     if (selName = "")
+        return empty
+
+    if !IsVolumeNameCandidate(selName)
         return empty
 
     names := []
@@ -234,6 +244,43 @@ DetectVolumeGroup(path, siblingNames) {
 
     sel := selName
     selLower := StrLower(sel)
+
+    ; EXE is byte volume zero, .001.sfxv is byte volume one. Names are
+    ; evidence only: continuous numbering does not prove the final piece exists.
+    if RegExMatch(sel, "i)^(.+)\.(exe|\d{3}\.sfxv)$", &sx) {
+        base := sx[1]
+        selected := StrLower(sx[2]) = "exe" ? 0 : Integer(SubStr(sx[2], 1, 3))
+        if (selected = 0 && StrLower(sx[2]) != "exe")
+            return empty
+        pieces := Map()
+        maxPiece := selected
+        for n in names {
+            if RegExMatch(n, "i)^" _VolEscape(base) "\.([0-9]{3})\.sfxv$", &piece) {
+                index := Integer(piece[1])
+                if index > 0 {
+                    pieces[index] := n
+                    maxPiece := Max(maxPiece, index)
+                }
+            }
+        }
+        if (!selected && !pieces.Count)
+            return empty
+        first := base ".exe"
+        members := [], missing := []
+        if nameSet.Has(StrLower(first)) {
+            first := nameSet[StrLower(first)]
+            members.Push(dir "\" first)
+        } else
+            missing.Push(first)
+        Loop maxPiece {
+            if pieces.Has(A_Index)
+                members.Push(dir "\" pieces[A_Index])
+            else
+                missing.Push(base "." Format("{:03}", A_Index) ".sfxv")
+        }
+        return {isVolume: true, kind: "sfxv", firstPath: dir "\" first,
+            members: members, missingVolumes: missing, selectedIsFirst: selected = 0}
+    }
 
     ; Pattern A: name.partNN.rar
     if (RegExMatch(sel, "i)^(.+)\.part(\d+)\.rar$", &mPart)) {
@@ -422,6 +469,146 @@ DetectVolumeGroup(path, siblingNames) {
     }
 
     return empty
+}
+
+; A .exe + .NNN.sfxv set is a byte-split self-extracting archive. 7-Zip does
+; not support opening a 7z archive from stdin, so the SFX stub is removed into
+; a temporary 7z file. Original pieces are never changed or removed.
+class SfxvInput {
+    __New(path) {
+        this.originalPath := path
+        this.commandPath := path
+        this.directory := ""
+        this.status := ""
+        this.volumeFirst := ""
+        this.missingVolumes := []
+        this.closed := false
+
+        SplitPath(path, , &dir)
+        if (!IsVolumeNameCandidate(path) || !DirExist(dir))
+            return
+
+        names := []
+        loop files dir "\*.*", "F"
+            names.Push(A_LoopFileName)
+        group := DetectVolumeGroup(path, names)
+        if (!group.isVolume || !group.HasOwnProp("kind") || group.kind != "sfxv")
+            return
+
+        this.volumeFirst := group.firstPath
+        this.missingVolumes := group.missingVolumes
+        if (group.missingVolumes.Length || !FileExist(group.firstPath)) {
+            this.status := ArchiveStatus.MISSING_VOLUME
+            return
+        }
+
+        offset := FindSfx7zOffset(group.firstPath)
+        if (offset < 0) {
+            this.status := ArchiveStatus.NOT_ARCHIVE
+            return
+        }
+
+        Loop 8 {
+            candidate := dir "\__smartzip_sfxv_" A_TickCount "_" Random(100000, 999999)
+            if !DirExist(candidate) {
+                this.directory := candidate
+                break
+            }
+        }
+        if (this.directory = "") {
+            this.status := ArchiveStatus.IO_ERROR
+            return
+        }
+        try DirCreate(this.directory)
+        catch {
+            this.directory := ""
+            this.status := ArchiveStatus.IO_ERROR
+            return
+        }
+        this.commandPath := this.directory "\archive.7z"
+        if !MergeSfxvPieces(group.members, offset, this.commandPath) {
+            this.status := ArchiveStatus.IO_ERROR
+            this.Close()
+        }
+    }
+
+    Close() {
+        if this.closed
+            return
+        this.closed := true
+        if (this.commandPath != this.originalPath && this.commandPath != "")
+            try FileDelete(this.commandPath)
+        if (this.directory != "" && DirExist(this.directory))
+            try DirDelete(this.directory)
+    }
+}
+
+MergeSfxvPieces(members, firstOffset, destination) {
+    source := ""
+    target := ""
+    try {
+        target := FileOpen(destination, "w")
+        if !target
+            return false
+        ioBuf := Buffer(1024 * 1024, 0)
+        for index, member in members {
+            source := FileOpen(member, "r")
+            if !source
+                throw Error("Cannot open SFXV volume")
+            if (index = 1)
+                source.Pos := firstOffset
+            while (read := source.RawRead(ioBuf, ioBuf.Size)) > 0
+                target.RawWrite(ioBuf, read)
+            source.Close()
+            source := ""
+        }
+        target.Close()
+        target := ""
+        return FileExist(destination) != ""
+    } catch {
+        if source
+            try source.Close()
+        if target
+            try target.Close()
+        try FileDelete(destination)
+        return false
+    }
+}
+
+FindSfx7zOffset(path) {
+    file := FileOpen(path, "r")
+    if !file
+        return -1
+    size := Min(FileGetSize(path), 16 * 1024 * 1024)
+    if (size < 6) {
+        file.Close()
+        return -1
+    }
+    dataBuf := Buffer(size, 0)
+    read := file.RawRead(dataBuf, size)
+    file.Close()
+    if (read <= 0)
+        return -1
+    Loop (read - 5) {
+        pos := A_Index - 1
+        if (NumGet(dataBuf, pos, "UChar") = 0x37
+            && NumGet(dataBuf, pos + 1, "UChar") = 0x7A
+            && NumGet(dataBuf, pos + 2, "UChar") = 0xBC
+            && NumGet(dataBuf, pos + 3, "UChar") = 0xAF
+            && NumGet(dataBuf, pos + 4, "UChar") = 0x27
+            && NumGet(dataBuf, pos + 5, "UChar") = 0x1C)
+            return pos
+    }
+    return -1
+}
+
+WriteOperationTiming(host, operation, started) {
+    if (!host.HasOwnProp("timingLog") || !host.timingLog)
+        return
+    logPath := A_ScriptDir "\SmartZip-timing.log"
+    if host.HasOwnProp("scriptDirOverride") && host.scriptDirOverride != ""
+        logPath := host.scriptDirOverride "\SmartZip-timing.log"
+    try FileAppend(operation " duration_ms=" (A_TickCount - started) "`r`n", logPath, "UTF-8")
 }
 
 _VolEscape(s) {

@@ -25,7 +25,7 @@ $expected = [ordered]@{
   'PasswordPreflight.Tests.ps1'=98
   'ExtractionLifecycle.Tests.ps1'=39
   'NestingMigration.Tests.ps1'=30
-  'DiagnosticUI.Tests.ps1'=52
+  'DiagnosticUI.Tests.ps1'=53
   'Real7Zip.Integration.Tests.ps1'=36
 }
 foreach ($item in $expected.GetEnumerator()) {
@@ -39,11 +39,35 @@ if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 & 'C:\Tool\7-Zip-Zstandard\7z.exe' i | Select-Object -First 5
 ```
 
-Expected exact totals after the final contract fix: static `184/184`, diagnostics `193/193`, capture `15/15`, password/workflow `98/98`, lifecycle `39/39`, nesting `30/30`, UI `52/52`, real integration `36/36`; overall `647/647`.
+Expected exact totals after the final contract fix: static `184/184`, diagnostics `193/193`, capture `15/15`, password/workflow `98/98`, lifecycle `39/39`, nesting `30/30`, UI `53/53`, real integration `36/36`; overall `648/648`.
 
 The final review adds two executable warning-token assertions and fifteen executable password-recovery contract assertions. The focused six-suite run is `596/596`; capture and real integration retain their unchanged expected counts for the next whole-branch gate.
 
 ## Real-7-Zip integration suite
+
+### Directory-scan optimization regression
+
+Run `Invoke-Pester -Script '.\tests\DirectoryScanOptimization.Tests.ps1' -PassThru`
+in addition to the eight-suite gate. Expected: 1 passed, 0 failed. This runs 120
+volume-detection comparisons against commit `de80a38` (requires local Git history),
+including plain files, numeric evidence, missing volumes, old RAR and case variants.
+The existing eight-suite total stays 648; with this regression the total is 649.
+
+### SFXV self-extracting split regression
+
+Run the following in addition to the contract gate:
+
+```powershell
+Invoke-Pester -Script './tests/Sfxv.Tests.ps1' -PassThru
+Invoke-Pester -Script './tests/Sfxv.Integration.Tests.ps1' -PassThru
+```
+
+Expected: `Sfxv.Tests.ps1` 1/1 and `Sfxv.Integration.Tests.ps1` 36/36.
+The integration suite creates data-only MZ/SFXV fixtures, strips the self-extractor
+stub into a temporary regular 7z stream, and verifies plain, encrypted, warning,
+missing-volume, cleanup, and timing behavior. It never executes an archive EXE.
+The extra temporary file requires free space roughly equal to the archive payload;
+the original SFXV volumes are never modified or deleted.
 
 | File | Role |
 |---|---|
