@@ -1,30 +1,47 @@
 # Active Task
 
-## Performance profiling design awaiting review — 2026-10-06 (Codex)
+## Post-processing fast-path design awaiting review — 2026-10-06 (Codex)
 
-- Goal: make SmartZip feel/measure faster without changing extraction outcomes,
-  output placement, source-retention behavior, or existing settings.
-- User approved the evidence-first direction and the design in
-  `docs/superpowers/specs/2026-10-06-performance-profiling-design.md`.
-- Context found: opt-in `timingLog` already records `prepare`, `probe`, `test`, and
-  aggregate `extract`; extract currently combines the 7-Zip process, follow-up source
-  test, and ambiguous-output verification. Post-extraction processing is not timed.
-  There is no matched large-archive before/after benchmark documented.
-- Proposed scope: retain aggregate labels; add opt-in fixed-label substage timing;
-  measure a repeatable workload; optimize only a measured SmartZip-side hotspot.
-  No asynchronous UI redesign. Implementation has not started and awaits review of
-  the design document by the user.
-- Starting state: branch `agent/diagnostic-ui-contract-repair`, clean at
-  `03551326237a37278d9817b4dc951ca28daa422c`.
-- Files changed this turn: the design document and this continuity handoff only.
-- Commands/results: read `ACTIVE_TASK.md`, `DECISIONS.md`, `README.md`,
-  `tests/README.md`, and `git status`; initial worktree was clean. `git diff --check`
-  after drafting the spec exited 0. No tests were run because no executable code
-  changed.
-- Next step: user reviews the design document; after approval, create an
-  implementation plan before touching application code. Proposed verification is
-  the documented 805-assertion full gate plus repeatable same-workload timing and
-  output-integrity comparison.
+- Goal: improve SmartZip smoothness without changing extraction outcome, placement,
+  source-retention, password, or settings behavior. User approved the umbrella design
+  and profiling implementation plan; no asynchronous UI redesign is in scope.
+- Added opt-in timings while preserving `prepare`, `probe`, `test`, and `extract`:
+  `7z_extract`, `source_test`, `output_verify` (only when run), and `postprocess`.
+  The setting stays off by default; lines contain only fixed labels and durations.
+- RED/GREEN: SFXV integration was 137/141 with exactly the three missing timing
+  labels failing; static suite was 184/188 with the four new boundaries failing.
+  After implementation focused suites passed 141/141 and 188/188.
+- Full serial gate: 813/813 passed, zero failed/skipped/pending/inconclusive;
+  `git diff --check` exited 0. Hook-free production compile exited 0; SHA-256
+  `1545C172517496F3A66A3DF569C37494D2DB626C4637981D081F0F2D72B60C2B`. Production
+  smoke passed `valid`, `crcPartial`, `splitMissing`, `encryptedHeader`, with zero
+  leaked processes and redaction passing. Installed `C:\Tool\SmartZip` was untouched.
+- Three matched runs on a controlled 13,367-zero-byte-file / 689-directory archive:
+  wall time 16,340 / 15,990 / 16,507 ms (median 16,340); `probe` 5,422 / 5,265 /
+  6,375 ms (median 5,422); `7z_extract` 7,406 / 7,235 / 6,656 ms (median 7,235);
+  `postprocess` 1,219 / 1,250 / 1,219 ms (median 1,219, 7.5% of wall time);
+  source `test` median 31 ms, follow-up `source_test` median 32 ms. Each output had
+  exactly 13,367 files and 689 directories. This is a count-stress proxy, not a
+  10 GB throughput claim.
+- User approved the evidence-based candidate: when all per-file rename/delete rules
+  are empty, skip `AfterUnzip` for regular files while retaining directory processing
+  and empty-folder cleanup. The targeted design is now documented at
+  `docs/superpowers/specs/2026-10-06-afterunzip-noop-fast-path-design.md`.
+  Implementation has not started; the written design review is the next gate.
+- Changed tracked files: `SmartZip.ahk`, `tests/Sfxv.Integration.Tests.ps1`,
+  `tests/SmartZip.Static.Tests.ps1`, `tests/README.md`, `ini.md`, this file. The
+  implementation plan is at `docs/superpowers/plans/2026-10-06-extraction-performance-profiling.md`
+  (ignored by repository rules). Test-generated `PasswordPreflight.Fragment.ahk`
+  and both temporary profiling roots were removed after all processes exited.
+- Commands/results: focused Pester 141/141 and 188/188; documented 13-suite gate
+  813/813; hook-free Ahk2Exe build exit 0; production smoke 4/4, leak count 0,
+  redaction true; three-run matched count-stress benchmark above; `git diff --check`
+  exit 0 before this handoff edit (rerun afterward). No commit or push of profiling
+  code was made; current branch is `agent/diagnostic-ui-contract-repair`. For this
+  documentation-only change, run `git diff --check`; executable suites are not rerun.
+- Next step after written design review: TDD tests proving the
+  no-rules fast path, configured rename/delete rules, empty directory cleanup, and
+  nested extraction; rerun the 813-test gate, production smoke, and same workload.
 
 ## Real SFXV warning fix verified; GitHub publication in progress — 2026-10-06 (Codex)
 
