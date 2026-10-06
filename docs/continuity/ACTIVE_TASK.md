@@ -1,5 +1,31 @@
 # Active Task
 
+## Performance profiling design awaiting review — 2026-10-06 (Codex)
+
+- Goal: make SmartZip feel/measure faster without changing extraction outcomes,
+  output placement, source-retention behavior, or existing settings.
+- User approved the evidence-first direction and the design in
+  `docs/superpowers/specs/2026-10-06-performance-profiling-design.md`.
+- Context found: opt-in `timingLog` already records `prepare`, `probe`, `test`, and
+  aggregate `extract`; extract currently combines the 7-Zip process, follow-up source
+  test, and ambiguous-output verification. Post-extraction processing is not timed.
+  There is no matched large-archive before/after benchmark documented.
+- Proposed scope: retain aggregate labels; add opt-in fixed-label substage timing;
+  measure a repeatable workload; optimize only a measured SmartZip-side hotspot.
+  No asynchronous UI redesign. Implementation has not started and awaits review of
+  the design document by the user.
+- Starting state: branch `agent/diagnostic-ui-contract-repair`, clean at
+  `03551326237a37278d9817b4dc951ca28daa422c`.
+- Files changed this turn: the design document and this continuity handoff only.
+- Commands/results: read `ACTIVE_TASK.md`, `DECISIONS.md`, `README.md`,
+  `tests/README.md`, and `git status`; initial worktree was clean. `git diff --check`
+  after drafting the spec exited 0. No tests were run because no executable code
+  changed.
+- Next step: user reviews the design document; after approval, create an
+  implementation plan before touching application code. Proposed verification is
+  the documented 805-assertion full gate plus repeatable same-workload timing and
+  output-integrity comparison.
+
 ## Real SFXV warning fix verified; GitHub publication in progress — 2026-10-06 (Codex)
 
 - User asked to fix the failed real-sample verification. Preserved Qoder's pre-existing
