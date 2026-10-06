@@ -194,18 +194,13 @@ Describe 'Real7Zip Integration' {
                 # Compile TEMP-injected SmartZip.ahk only — never compile repo SmartZip.ahk for integration
                 $outExe = Join-Path $script:TempRoot 'SmartZip-Integration.exe'
                 $baseAhk = Join-Path (Split-Path $script:AhkExe -Parent) 'AutoHotkey64.exe'
-                $p = Start-Process -FilePath $script:Ahk2Exe -ArgumentList @(
-                    '/in', $script:InjectedSmartZipPath,
-                    '/out', $outExe,
-                    '/base', $baseAhk,
-                    '/silent'
-                ) -Wait -PassThru -NoNewWindow
+                # Start-Process joins ArgumentList into one native command line;
+                # quote paths explicitly so Program Files is not split by Ahk2Exe.
+                $compileArgs = '/in "{0}" /out "{1}" /base "{2}"' -f `
+                    $script:InjectedSmartZipPath, $outExe, $baseAhk
+                $p = Start-Process -FilePath $script:Ahk2Exe -ArgumentList "$compileArgs /silent" -Wait -PassThru -NoNewWindow
                 if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outExe)) {
-                    $p2 = Start-Process -FilePath $script:Ahk2Exe -ArgumentList @(
-                        '/in', $script:InjectedSmartZipPath,
-                        '/out', $outExe,
-                        '/base', $baseAhk
-                    ) -Wait -PassThru -NoNewWindow
+                    $p2 = Start-Process -FilePath $script:Ahk2Exe -ArgumentList $compileArgs -Wait -PassThru -NoNewWindow
                     if ($p2.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outExe)) {
                         throw "Ahk2Exe failed exit=$($p2.ExitCode)"
                     }

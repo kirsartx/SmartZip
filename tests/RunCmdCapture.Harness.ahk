@@ -83,6 +83,36 @@ AssertContains(r5.output, "UTF8_OK", "capture_default_cp_output")
 ; 6) Process should not remain as CMDPID after return
 AssertEq(host.CMDPID, 0, "capture_clears_cmdpid")
 
+; Split UTF-8 codepoints across writes and pipe reads. Text-mode incremental
+; reads can replace a leading byte before its continuation bytes arrive.
+emitter := A_Temp "\SmartZip-Utf8Emitter-" DllCall("GetCurrentProcessId") ".ahk"
+emitterText := "
+(
+#Requires AutoHotkey v2.0
+#SingleInstance Off
+h := DllCall("GetStdHandle", "Int", -11, "Ptr")
+b := Buffer(1)
+Loop 8 {
+    for value in [0xE4, 0xB8, 0xAD] {
+        NumPut("UChar", value, b)
+        DllCall("WriteFile", "Ptr", h, "Ptr", b.Ptr, "UInt", 1, "UInt*", &written := 0, "Ptr", 0)
+        Sleep 50
+    }
+}
+ExitApp
+)"
+try FileDelete(emitter)
+FileAppend(emitterText, emitter, "UTF-8")
+expectedUtf8 := ""
+Loop 8
+    expectedUtf8 .= Chr(0x4E2D)
+try {
+    splitUtf8 := host.RunCmdCapture('"' A_AhkPath '" /ErrorStdOut "' emitter '"', "UTF-8")
+    AssertTrue(splitUtf8.exitCode = 0 && splitUtf8.output == expectedUtf8, "capture_preserves_split_utf8")
+} finally {
+    FileDelete(emitter)
+}
+
 summary := "SUMMARY passed=" passCount " failed=" failCount
 lines.Push(summary)
 text := ""

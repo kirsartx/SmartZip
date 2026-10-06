@@ -452,6 +452,8 @@ class SmartZip
                 path := volume.firstPath
             }
 
+            inputScope := SfxvTaskScope(this, path)
+            try {
             if (IsObject(preProbe)
                 && preProbe.HasOwnProp("status")
                 && preProbe.HasOwnProp("stage") && preProbe.stage = "probe"
@@ -594,6 +596,9 @@ class SmartZip
 
             fallback := ArchiveResult(ArchiveStatus.UNKNOWN_ERROR, "extract", -1, path)
             return fallback
+            } finally {
+                inputScope.Close()
+            }
         }
 
         ;解压嵌套 — source recycle is owned by zipx nestedMayRecycle (clean OK only), not here
@@ -612,6 +617,8 @@ class SmartZip
             if (vol.isVolume && !vol.selectedIsFirst)
                 return  ; never re-enter non-first volumes; volumes never deleted here
 
+            inputScope := SfxvTaskScope(this, path)
+            try {
             probe := this.ProbeArchive(path)
             switch probe.status
             {
@@ -627,6 +634,9 @@ class SmartZip
             this.exitCode := -1
             this.Unzip(path, probe)
             this.Loging("解压嵌套 <--> " path, A_LineNumber)
+            } finally {
+                inputScope.Close()
+            }
             ; Nested source recycle only after nested clean OK — Task 5 zipx.
             ; Never handle it here on warning/failure/volume, and never permanently delete a source.
         }
@@ -1317,7 +1327,7 @@ class SmartZip
 
     ProbeArchive(path) {
         timingStarted := A_TickCount
-        input := SfxvInput(path)
+        input := AcquireSfxvInput(this, path)
         if (input.status != "") {
             result := ArchiveResult(input.status, "probe", 2, path)
             result.volumeFirst := input.volumeFirst
@@ -1370,7 +1380,7 @@ class SmartZip
 
     TestArchive(path, password := "") {
         timingStarted := A_TickCount
-        input := SfxvInput(path)
+        input := AcquireSfxvInput(this, path)
         if (input.status != "") {
             result := ArchiveResult(input.status, "test", 2, path)
             result.volumeFirst := input.volumeFirst
@@ -1606,7 +1616,7 @@ class SmartZip
 
     ExtractArchiveToTemp(path, password, tempDir) {
         timingStarted := A_TickCount
-        input := SfxvInput(path)
+        input := AcquireSfxvInput(this, path)
         if (input.status != "") {
             result := ArchiveResult(input.status, "extract", 2, path)
             result.volumeFirst := input.volumeFirst
@@ -1635,41 +1645,50 @@ class SmartZip
         if (extractExit = 255) {
             result := ArchiveResult(ArchiveStatus.CANCELLED, "extract", 255, archivePath)
         } else {
-            ; Follow-up console test is a different process. Use its text for hard-error detail
-            ; and for exit-0 warning detection, but never promote GUI exit 1 to OK_WITH_WARNING
-            ; solely because the later test printed warning evidence.
+            ; The follow-up console test is a different process. It keeps its own exit code
+            ; and text, and can only lower the verdict or explain a hard error: its "Everything
+            ; is Ok" never certifies what the extract process wrote.
             cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' commandPath '"'
             cap := this.RunCmdCapture(cmd, "UTF-8")
             if this.cmdLog
                 this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
-            if (extractExit = 1) {
-                ; No GUI extract stdout capture available: exit 1 remains failure.
-                ; Classify with empty extract text first so t-warning text cannot invent success.
-                result := Classify7zResult("extract", extractExit, "", archivePath)
-                detail := Classify7zResult("extract", extractExit, cap.output, archivePath)
-                if (detail.status != ArchiveStatus.OK && detail.status != ArchiveStatus.OK_WITH_WARNING) {
-                    result := detail
-                    result.exitCode := extractExit
-                } else {
-                    result.exitCode := extractExit
-                    if (result.status = ArchiveStatus.OK || result.status = ArchiveStatus.OK_WITH_WARNING)
-                        result.status := ArchiveStatus.UNKNOWN_ERROR
-                    result.isCleanSuccess := false
-                    result.mayDeleteSource := false
-                    result.passwordRetryEligible := false
-                }
-                ; Carry encryption / hard-error detail flags when detail is a real failure
-                if (detail.encryptionEvidence)
+            verify := Classify7zResult("verify", cap.exitCode, cap.output, archivePath)
+
+            ; An ambiguous extract code needs output-side proof. Skip the proof whenever
+            ; something makes the expected file set unknowable, which keeps the result
+            ; conservative instead of guessing.
+            check := ""
+            outputVerified := false
+            ; hideBool also selected the executable, so its negation is the measured fact
+            ; that the ambiguous code came from the GUI front-end rather than the console.
+            usedGui := !hideBool
+            if (extractExit != 0 && this.excludeArgs = "" && this.codePage = "") {
+                check := VerifyExtractedOutput(this, commandPath, tempDir, password)
+                outputVerified := check.verified
+            }
+
+            ; Warning and error lines still come from the source test, which is where the
+            ; reason for a warning lives; the status itself comes from the decision.
+            result := Classify7zResult("extract", extractExit, cap.output, archivePath)
+            result.status := ExtractionVerdict(extractExit, verify.status, outputVerified, usedGui)
+            result.exitCode := extractExit
+            result.output := ""
+            result.verifyExitCode := cap.exitCode
+            result.verifyOutput := cap.output
+            if (check != "") {
+                prefix := check.verified ? "output-verified " : "output-unverified "
+                suffix := check.reason != "" ? " reason=" check.reason : ""
+                result.outputCheck := prefix . check.summary . suffix
+            }
+            if (verify.status != ArchiveStatus.OK && verify.status != ArchiveStatus.OK_WITH_WARNING) {
+                result.errorLines := verify.errorLines
+                result.warningLines := verify.warningLines
+                if (verify.encryptionEvidence)
                     result.encryptionEvidence := true
-                if (detail.status = ArchiveStatus.DATA_CORRUPT && result.encryptionEvidence)
+                if (result.status = ArchiveStatus.DATA_CORRUPT && result.encryptionEvidence)
                     result.passwordRetryEligible := true
-                if (detail.errorLines.Length) {
-                    result.errorLines := detail.errorLines
-                    result.output := detail.output
-                }
-            } else {
-                result := Classify7zResult("extract", extractExit, cap.output, archivePath)
-                result.exitCode := extractExit
+                else
+                    result.passwordRetryEligible := false
             }
         }
         result.tempOutputDir := tempDir
@@ -1761,6 +1780,15 @@ class SmartZip
             text .= "error: " e "`r`n"
         if (result.output != "")
             text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        ; Name the process each piece of evidence came from: the extract exit code and the
+        ; follow-up source test are two different runs.
+        if (result.outputCheck != "")
+            text .= "outputCheck=" result.outputCheck "`r`n"
+        if (result.verifyExitCode != -1 || result.verifyOutput != "") {
+            text .= "verify (source test) exitCode=" result.verifyExitCode "`r`n"
+            if (result.verifyOutput != "")
+                text .= "verify (source test) output:`r`n" SubStr(result.verifyOutput, 1, 4096) "`r`n"
+        }
         ; Password/secret redaction first (default keeps full paths for internal use).
         text := RedactDiagnostic(text)
         if (result.partialOutputDir != "" && DirExist(result.partialOutputDir)) {
@@ -1910,6 +1938,13 @@ class SmartZip
             text .= "error: " e "`r`n"
         if (result.output != "")
             text .= "output:`r`n" SubStr(result.output, 1, 4096) "`r`n"
+        if (result.outputCheck != "")
+            text .= "outputCheck=" result.outputCheck "`r`n"
+        if (result.verifyExitCode != -1 || result.verifyOutput != "") {
+            text .= "verify (source test) exitCode=" result.verifyExitCode "`r`n"
+            if (result.verifyOutput != "")
+                text .= "verify (source test) output:`r`n" SubStr(result.verifyOutput, 1, 4096) "`r`n"
+        }
         return RedactDiagnostic(text, false)
     }
 
@@ -1936,6 +1971,10 @@ class SmartZip
             text .= " error=" e
         if (result.output != "")
             text .= " output=" SubStr(result.output, 1, 4096)
+        if (result.outputCheck != "")
+            text .= " outputCheck=" result.outputCheck
+        if (result.verifyExitCode != -1)
+            text .= " verifyExit=" result.verifyExitCode
         return RedactDiagnostic(text, true)
     }
 
@@ -2199,32 +2238,33 @@ class SmartZip
         enc := Codepage
         if (enc = "UTF-8" || enc = "utf-8")
             enc := "UTF-8"
-        File := FileOpen(hPipeR, "h", enc)
-
-        ; Read until the process exits; never ProcessClose on output content.
+        ; Preserve raw bytes until EOF. Decoding each partial pipe read can
+        ; replace a split UTF-8 character before continuation bytes arrive.
+        captured := Buffer(65536, 0)
+        capturedSize := 0
+        exited := false
         loop {
-            still := DllCall("PeekNamedPipe", "Ptr", hPipeR, "Ptr", 0, "Int", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0)
-            while !File.AtEOF {
-                chunk := File.Read(4096)
-                if (chunk != "")
-                    sOutput .= chunk
-                else
-                    break
-            }
-            if !DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 15) {
-                ; drain remaining bytes after exit
-                while !File.AtEOF {
-                    chunk := File.Read(4096)
-                    if (chunk != "")
-                        sOutput .= chunk
-                    else
-                        break
+            available := 0
+            readable := DllCall("PeekNamedPipe", "Ptr", hPipeR, "Ptr", 0, "UInt", 0,
+                "Ptr", 0, "UInt*", &available, "Ptr", 0)
+            if (readable && available > 0) {
+                count := Min(available, 65536)
+                if capturedSize + count + 2 > captured.Size
+                    captured.Size := Max(captured.Size * 2, capturedSize + count + 2)
+                if DllCall("ReadFile", "Ptr", hPipeR, "Ptr", captured.Ptr + capturedSize,
+                    "UInt", count, "UInt*", &received := 0, "Ptr", 0) && received > 0 {
+                    capturedSize += received
+                    continue
                 }
-                break
             }
-            if !still && !DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 0) {
+            ; Always recheck/drain the pipe after observing process exit.
+            if exited
                 break
-            }
+            exited := DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 15) = 0
+        }
+        if capturedSize {
+            NumPut("UShort", 0, captured, capturedSize)
+            sOutput := StrGet(captured.Ptr, capturedSize, enc)
         }
 
         if !DllCall("GetExitCodeProcess", "Ptr", hProcess, "UIntP", &ec := 0)

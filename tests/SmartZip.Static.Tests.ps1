@@ -896,13 +896,25 @@ Describe 'ExtractionLifecycleSafety' {
         $script:ExtractArchiveToTempBody | Should Match '255'
     }
 
-    It 'ExtractArchiveToTemp does not classify GUI exit 1 success from follow-up test warning text alone' {
+    It 'ExtractArchiveToTemp promotes only the measured GUI ambiguity, never code 1' {
         $b = $script:ExtractArchiveToTempBody
-        # Must special-case extractExit = 1 (or non-zero without extract capture) before borrowing t output as warning success
-        $ok = Test-Regex -Text $b -Pattern '(?s)extractExit\s*=\s*1|exitCode\s*=\s*1'
+        # The extract stage delegates every ambiguous code to one decision function instead of
+        # borrowing the follow-up test's warning text as success.
+        $ok = Test-Regex -Text $b -Pattern 'ExtractionVerdict\(\s*extractExit'
         $ok | Should Be $true
+        $lib = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../lib/ArchiveDiagnostics.ahk') -Raw
+        $lib | Should Match 'ExtractionVerdict\(extractExit, verifyStatus, outputVerified, usedGui\)'
+        # Promotion is pinned to the GUI front-end and to exit 2, so a console 2, a usage error
+        # or a launch failure cannot be upgraded even when the output verifies.
+        $lib | Should Match 'usedGui && extractExit = 2 && outputVerified'
+        $lib | Should Not Match 'extractExit = 1'
+        $lib | Should Not Match 'return outputVerified'
         # Must still re-test via console capture for diagnostics on other paths
         $b | Should Match ' t '
+        # usedGui has to describe the executable that really ran: the size switch is exactly
+        # what selects 7zG over the console build, so promotion is tied to that choice.
+        $b | Should Match 'hideBool := FileGetSize\(path\)\s*/\s*1024\s*/\s*1024\s*<\s*this\.hideRunSize'
+        $b | Should Match 'usedGui := !hideBool'
     }
 
     It 'no IsSuccess size or successPercent authorization remains' {

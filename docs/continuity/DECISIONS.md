@@ -1,5 +1,28 @@
 # Cross-Model Decisions
 
+## Output proof edge cases (2026-10-06)
+
+- 7z may omit CRC for zero-length regular files. Accept only when size parses as an
+  integer zero and a regular, non-reparse file exists with exactly zero bytes; all
+  nonempty files still require a matching CRC.
+- CRC covers raw bytes including UTF-8/UTF-16 BOMs. Seek to offset zero after AHK
+  `FileOpen`, which may auto-skip BOMs even when the caller later uses `RawRead`.
+- Decode captured command output only after reading all raw pipe bytes; UTF-8 characters
+  may be split across pipe reads.
+- Reject case/separator-colliding archive listing entries and case-folded written-file
+  keys. Check every output path component for reparse points before reading file contents.
+- These checks assume a stable output tree; they are not atomic against concurrent
+  hostile filesystem changes. The test account cannot enable case-sensitive NTFS folders.
+
+## Real-sample release gate (2026-09-20)
+
+- Synthetic regression success is insufficient to publish the GUI-exit-2 fix: the real
+  SFXV sample still fails because eight legitimate zero-byte files have no listed CRC.
+  Publication stays blocked until real-sample output verification succeeds safely.
+- Any empty-file accommodation must prove existence, regular-file identity and exact
+  zero length; it must not relax checksum requirements for nonempty files. Reparse and
+  destination-path collision findings must be resolved before claiming output integrity.
+
 ## Conversation Boundary
 
 Codex and EchoBird are separate conversation providers. Every provider switch starts a new conversation; models must rebuild context from repository files rather than continuing an old provider session.
@@ -98,7 +121,7 @@ The `DiagnosticUIHost` test double mirrors production `IsArchive` semantics: `Sp
 - No production test hook was added. The new coverage uses the existing
   `AvailableBytes` seam, source slicing, and exclusive handles on TEMP fixtures.
 
-## 7zG versus console exit codes and the extract verdict (2026-09-20, measured; fix not applied)
+## 7zG versus console exit codes and the extract verdict (2026-09-20, measured and implemented)
 
 Facts established by measurement on 7-Zip 26.02 ZS with a self-built Copy + 7zAES SFXV
 fixture carrying 1529 trailing bytes (nothing of the user's archive was touched):
@@ -140,30 +163,95 @@ fixture carrying 1529 trailing bytes (nothing of the user's archive was touched)
   newly permit recycling the source of a warned run. The extract stage needs its own verdict
   source, not less text.
 
-Proposed minimal fix, **deliberately not implemented this turn**:
+Implemented decision (2026-09-20 follow-up):
 
-1. Treat GUI exit 2 as indeterminate and resolve it from the post-extract console `t` **and** an
-   output-side inventory: every non-directory entry from `7z l -slt` present with a matching
-   size (hash small outputs). All present plus clean-or-warning `t` gives `OK_WITH_WARNING`;
-   anything else gives a partial or `DATA_CORRUPT` result.
-2. Keep per-process provenance on the result (`extractText` versus `verifyText`) and have
-   `WriteDiagnostic` label which process each block came from.
-3. Decide at product level whether extraction should stop depending on 7zG's codes at all
-   (console `7z.exe x` plus SmartZip's own progress window), or record formally that the two
-   branches have different contracts. This is the user's call, not an agent's.
+- `ExtractionVerdict(extractExit, verifyStatus, outputVerified, usedGui)` in
+  `lib/ArchiveDiagnostics.ahk` is now the only place an extract status is chosen from an
+  ambiguous code. A user break stays `CANCELLED`; any hard result from the source test is
+  returned as-is; exit `0` keeps the source test's status (so a source warning still downgrades
+  the outcome instead of looking clean). Promotion is pinned to the single measured
+  ambiguity - the **GUI** front-end returning **2** with the output proved - and everything
+  else stays `UNKNOWN_ERROR`: an earlier draft let any code other than 0/1/255 be promoted,
+  which a review rejected, because a console `2` means real failure and `3`/`4`/`7`/`8`/`-1`
+  mean usage, memory, lock, disk-full or an unassigned launch failure. A promoted result is
+  never `OK`, so `isCleanSuccess` and `mayDeleteSource` stay false and the source is never
+  recycled. `usedGui` is `!hideBool`, the same comparison that picked the executable, so the
+  verdict is told which contract the code came from instead of guessing.
+- Proof of integrity is per item, over **all** items: `VerifyExtractedOutput` reads
+  `7z l -slt` and compares every non-directory entry with the file actually written, by size
+  and by CRC-32 computed with `ntdll!RtlComputeCrc32` while streaming. An earlier proposal to
+  check only counts and sizes and hash small files was rejected: it cannot show that a large
+  file's content arrived, and the source test proves nothing about the output. The rejection is
+  now tested directly - damaging one output byte while the source stays intact makes the check
+  report `mismatched=1` and blocks promotion.
+- The check is skipped, and the result stays conservative, whenever the expected file set is
+  not knowable: `excludeArgs` or `codePage` set, listing empty or unparsable, an item listed
+  without a checksum, a missing item, or more files in the output than the archive lists
+  (which also covers `-aou` renames). It is not run at all when the exit code is already
+  unambiguous, so a normal extraction pays nothing; an ambiguous one costs one read pass.
+- Evidence stays per process. The extract result carries its own `exitCode` and its own
+  `output`; the follow-up source test is recorded separately as `verifyExitCode` and
+  `verifyOutput`, plus an `outputCheck=` line, and every diagnostic form labels that block as
+  coming from the source test. Deleting the `t` text alone was rejected as unsafe for the
+  reason measured above (exit `0` with empty text would have become `OK` and permitted source
+  recycling), so the source test still constrains the verdict - it just no longer impersonates
+  the extract run.
+- The GUI experience, password retry, exclusion rules, split-volume source retention and
+  failure isolation are unchanged, and the extraction binary is still chosen by `hideRunSize`.
+  Whether extraction should stop depending on 7zG's codes at all remains the user's product
+  decision; this change only stops treating that code as a success oracle.
 
-Required regression coverage alongside such a fix: `Classify7zResult` cases for
-`(2, warning-only text)` and `(2, empty text)`; an assertion that an extract result cannot
-carry `t` output; a `Host.Run7z` that mirrors production's binary choice so the GUI branch is
-finally exercised; one trailing-data fixture crossing the `hideRunSize` boundary that must
-produce the same status on both sides; and file count plus hash checks for completeness instead
-of trusting `t`.
+Required regression coverage alongside such a fix: `Classify7zResult` and `ExtractionVerdict`
+cases for `(2, warning-only text)`, `(2, empty text)`, `(255, verified output)` and
+`(1, warning text)`; a provenance assertion that an extract result cannot carry `t` text;
+oracle cases for complete, damaged, missing, unexpected and no-checksum outputs; and file count
+plus hash checks for completeness instead of trusting `t`.
 
-Still unproven, and not to be assumed by whoever continues: the real mid-run 7zG cancel exit
-code (pausing ~100 ms into a 1.34 GB run did not stop the write, so no genuine mid-run abort
-was observed) and therefore whether `extractExit = 255` to `CANCELLED` is reachable through the
-GUI at all; other 7zG warning classes; and whether the user's own tail is the same kind of
-trailing data beyond its matching `Tail Size=1529`.
+Hardening added after review of that first implementation (all of it red-then-green, labels
+`oracle_*` / `verdict_*_not_promoted` in `Sfxv.Integration.Tests.ps1`):
+
+- The listing is treated as another process's evidence: `report.listingExit` is now **checked**
+  (only `0` is accepted, so a process that printed plausible rows and then failed still
+  refuses), and the text is validated structurally before one entry is believed - the
+  `----------` separator must exist to tell the archive header from its entries, the header
+  must name the archive that was queried, and each entry must carry a size, attributes and
+  - for files - a checksum, with no duplicate and no truncated final entry.
+- `outputDir + item.path` is validated before use: absolute, UNC, device, alternate-stream and
+  `..` shapes are refused, and the normalised target must lie inside the normalised output
+  directory behind a `\` boundary, so a prefix like `D:\out2` cannot pass for `D:\out`.
+  A reparse point aborts verification instead of reading a file the extraction never wrote,
+  both where a listed item stands and during the walk of what was actually written.
+  This closes a real defect found while writing the tests: the enumeration walk recursed
+  through junctions, so a link out of the output directory could be certified as output.
+- Expected and written files are compared **as sets in both directions**, not by count: a
+  fixture with one deleted and one added file has matching counts, and only the set comparison
+  refuses it. Nothing is silently skipped, because a skipped suspicious entry would leave a
+  hole that still looks verified.
+- Any CRC or read exception ends as a conservative failure with a reason (the reason now
+  carries the line), so verification can never escape and bypass failure isolation.
+
+Automated real-7zG coverage now exists: `tests/GuiExtraction.Tests.ps1` with
+`tests/GuiDismissDriver.ahk`, seven assertions that launch the executables themselves with the
+argument shape `Run7z` builds and read their own exit codes - clean exit 0, trailing data exit
+2 with complete output, the same archive on the console build exit 0 with identical output (the
+two sides of `hideRunSize`), corruption exit 2 with output that does not verify, an unwritable
+output path, and a mid-run cancel that leaves output strictly partial. Ran 3/3 times green in
+about 8 seconds each. An earlier `tests/ExtractGui.Tests.ps1` was deleted when it timed out;
+deleting it and calling the branch covered was wrong, and this suite replaces it.
+
+What the new suite had to learn about driving that dialog, none of it guessable from the
+outside: `WinExist` returns only the top-most window and 7-Zip keeps its progress dialog open
+underneath the box that follows, so the driver walks the top-level Z-order outward; `GetParent`
+reports the **owner** for a dialog, so filtering on it discarded the very message box that had
+to be clicked (which looked exactly like a hang); and `CallbackCreate` is avoided because this
+build rejects every form of its callable argument with "Invalid base". On the cancel gesture
+itself, measured on a *running* dialog: Escape, `WM_CLOSE` and a click on the default control
+(id 2) leave the extraction untouched, the first owner-drawn button (id 444) only pauses it, and
+the second (id 446) cancels - but only when the archive is not solid, because inside one solid
+block 7-Zip can stop only at the end. The earlier hand measurement of a 1.34 GB job
+interrupted at 3.2 % returning **2** therefore stays the only observation of a cancel on a
+solid archive; the automated fixture uses `-ms=off` and asserts bytes on disk, never a
+substituted exit code. A warned 7zG still never exits without acknowledgement.
 
 Test-harness constraints learned the hard way: dismiss 7zG with `PostMessage`, because
 `SendMessageW(BM_CLICK)` blocks the caller indefinitely on that dialog; a warned 7zG never

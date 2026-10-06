@@ -32,8 +32,7 @@ ExitApp(0)
         $program = $program.Replace('__LIB__', (Join-Path $repo 'lib/ArchiveDiagnostics.ahk'))
         $scriptPath = Join-Path $root 'recognition.ahk'
         [IO.File]::WriteAllText($scriptPath, $program, [Text.UTF8Encoding]::new($true))
-        $p = Start-Process (Resolve-AhkExe) -ArgumentList @('/ErrorStdOut', ('"' + $scriptPath + '"')) -PassThru -NoNewWindow
-        if (-not $p.WaitForExit(30000)) { $p.Kill(); throw 'SFXV recognition timeout' }
-        $p.ExitCode | Should Be 0
+        $exitCode = Invoke-AhkRunner -ScriptPath $scriptPath -TimeoutMessage 'SFXV recognition timeout'
+        $exitCode | Should Be 0
     }
 }

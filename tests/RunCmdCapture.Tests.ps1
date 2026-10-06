@@ -107,6 +107,7 @@ Describe 'RunCmdCaptureBehavior' {
         'capture_default_cp_exit_0',
         'capture_default_cp_output',
         'capture_clears_cmdpid'
+        'capture_preserves_split_utf8'
     )
 
     foreach ($name in $cases) {

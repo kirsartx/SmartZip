@@ -1,5 +1,500 @@
 # Active Task
 
+## Real SFXV warning fix verified; GitHub publication in progress — 2026-10-06 (Codex)
+
+- User asked to fix the failed real-sample verification. Preserved Qoder's pre-existing
+  uncommitted changes and worked in the same branch. Production changes address: eight
+  legitimate zero-byte files without 7-Zip CRC; BOM bytes skipped by AHK text-mode file
+  open before RawRead; UTF-8 codepoints split across pipe reads; output-root/ancestor
+  reparse points; case-folded destination collisions; and GUI test false leak detection.
+- Added regression cases first. The expanded SFXV suite was red `135 passed / 2 failed`
+  for BOM and case-folded enumerator collision (the aggregate harness assertion is the
+  second failure); after the fixes it passed 137/137. RunCmdCapture was red 14/16 on the
+  split UTF-8 emitter; after collecting raw bytes and decoding once at EOF it passed
+  16/16. `GuiExtraction.Tests.ps1` passed 7/7 with a held-live unrelated 7z sentinel,
+  proving owned-process leak checks don't flag unrelated jobs.
+- Final hook-free build: `F:\SmartZip-Validation-20260921\final-app\SmartZip.exe`,
+  SHA-256 `EEDDB9D7D66FD1ADD3C9BEDA0A7E17137902F350820326E2EAB03D251D84D775E`, Ahk2Exe
+  exit 0. Production smoke passed all four scenarios (valid, crcPartial, splitMissing,
+  encryptedHeader), `LeakedProcessCount=0`, `RedactionOk=True`.
+- Repeated the full four-volume real-package extraction from SHA-256-verified isolated
+  copies. After acknowledging 7zG's trailing-data warning, production returned
+  `OK_WITH_WARNING`, extract exit 2, verify exit 0, `output-verified`, `checked=13367/13367`,
+  689 directories, zero mismatched/missing/unexpected/no-CRC entries. Final output had
+  13367 files totaling 10162118522 bytes (matches the archive's reported Size), all four
+  original input hashes were rechecked unchanged. Installed EXE/INI are untouched.
+- The environment denied `fsutil file setCaseSensitiveInfo` on an isolated test directory
+  (access denied). Listing collisions are covered directly, and output enumeration rejects
+  a pre-seeded normalized key; the actual case-sensitive-NTFS on-disk collision scenario
+  could not be enabled in this Windows account. Component/reparse tests run with real
+  junction fixtures. Reparse defense assumes the path tree does not change concurrently.
+- The full serial 13-suite gate passed exactly `805/805`, with zero failed, skipped, pending,
+  or inconclusive tests. Exact counts in order: 1, 137, 184, 193, 16, 98, 39, 30, 53, 36,
+  10, 7, 1. The focused `Real7Zip.Integration.Tests.ps1` rerun also passed 36/36.
+- The first full-gate attempt exposed a test harness defect: `Start-Process -ArgumentList`
+  split the AutoHotkey base path at `C:\Program Files`. Quoting all compiler paths fixed the
+  harness; the retry and full gate both compiled and passed. The fix is in
+  `tests/Real7Zip.Integration.Tests.ps1`.
+- `git diff --check` passed before the latest continuity edit; rerun after edits. Stage only
+  intended sources/tests/docs, review staged diff and secret scan, commit, push to `origin`
+  on the existing branch, and verify the remote ref. The old Kirs.9 installed build remains
+  untouched; this request did not ask to deploy the EXE locally.
+- Verification commands and exact outcomes: `Invoke-Pester -Script '.\tests\Real7Zip.Integration.Tests.ps1' -PassThru`
+  => 36 passed, 0 failed/skipped/pending/inconclusive; serial 13-suite PowerShell gate
+  documented in `tests/README.md` => 805 passed, 0 failed/skipped/pending/inconclusive;
+  `git diff --check` => exit 0 (rerun after this edit).
+- Test/build artifacts reside under `F:\SmartZip-Validation-20260920` and
+  `F:\SmartZip-Validation-20260921`; no source archive or embedded program was run.
+  Isolated test configuration and saved password clones stay outside the repository.
+
+## Publication blocked by real sample validation — 2026-09-20 (Codex)
+
+- User authorized independent tests and GitHub upload only after validation. No commit,
+  push, production code edit or deployment was performed in this validation turn.
+- Ran all 13 documented suites under Windows PowerShell 5.1: 785 non-GUI assertions
+  passed; GUI first run 6/7 because its broad recent-process scan counted the concurrent
+  real sample extraction. Serial GUI rerun passed 7/7, zero failed/skipped/pending.
+  Thus all 792 assertions passed across runs, not in one uninterrupted green gate.
+  Initial invocation under the default PowerShell rejected `-Show` before running tests.
+- Tested the installed EXE (SHA-256 `6031E2B04C0739F7E7D80113D5DF03508BAB1962D7336B64003DC9C207DB27C5`)
+  in an isolated app directory against SHA-256-verified copies of all four real SFXV
+  members. Existing saved password candidates were used locally; no password note read,
+  no archive/program inside the sample executed, no original archive/config changed.
+  Source deletion, nested extraction and rename/delete/exclusion rules were disabled
+  only in the isolated test INI. Original installed EXE and INI hashes stayed unchanged.
+- Reproduced 7zG at 100%, 13367 files, 9691 MiB, trailing-data warning; clicked Close
+  only after completion. Final production verdict was still `UNKNOWN_ERROR`, extract
+  exit 2, source verification exit 0, with `listing file entry without a checksum`.
+  Output was quarantined, not accepted as complete. This blocks publication.
+- Root cause evidence: real `7z l -slt` exited 0 and listed 14056 items; exactly eight
+  regular files have size 0, Attributes A and an empty CRC. Current validation rejects
+  all checksum-less files, including these legitimate empty files. Do not blanket-accept
+  missing CRC for nonempty files. Add regression coverage and prove exact zero length.
+- Timing: prepare 5454 ms, successful source test 4687 ms, extract wrapper 59360 ms.
+  The last includes waiting for manual UI acknowledgement and verification, so it is
+  NOT a throughput benchmark. 7zG itself displayed 18 seconds; no baseline speed claim.
+- Read-only review additionally identified output-root/ancestor reparse handling and
+  case-colliding listing entries as important integrity gaps (static findings, not runtime
+  reproduced). Root junctions can bypass current enumeration checks; ancestor links can
+  be read before rejection; A.bin/a.bin collapse in lowercase expected-file sets.
+  GUI leakage assertion also needs owned-process tracking instead of a ten-minute scan.
+- Remaining: fix/retest empty files and review findings, rerun full gate and real sample,
+  then review staged content for secrets and push to the user's existing GitHub remote.
+  Do not publish this as a completed fix merely because synthetic tests pass.
+- Test artifacts remain outside Git under `F:\SmartZip-Validation-20260920` for retest.
+  Test process exited and its merged temporary archive was removed by normal teardown.
+  Removed the isolated password-bearing INI after exit; installed INI was untouched.
+  Test-generated password fragment was removed and capture-fragment encoding restored.
+  Final `git diff --check` passed (exit 0; line-ending warnings only).
+  Only continuity documents were intentionally edited; test-generated fragments are
+  not part of the deliverable. No raw logs or passwords were added to project files.
+
+## Review gaps closed, real-7zG coverage and local deployment — 2026-09-20 (Qoder)
+
+- Closed all four items a review had rejected, each red-then-green: the listing process's own
+  exit code is now required to be `0` before its text is used and the text is validated
+  structurally; every listed path is proved to be a safe relative path resolving inside the
+  output directory behind a directory boundary, with reparse points refused rather than read
+  through; expected and written files are compared as sets in both directions; and promotion is
+  narrowed to `usedGui && extractExit == 2 && outputVerified`, so a console `2` and codes
+  `1/3/4/7/8/-1/99` stay failures even with verified output.
+- Added `tests/GuiExtraction.Tests.ps1` with `tests/GuiDismissDriver.ahk`: seven assertions on
+  the real `7zG.exe` / `7z.exe` contract, launching the executables with the argument shape
+  `Run7z` builds and reading their own exit codes, including the two sides of `hideRunSize` and
+  a genuine mid-run cancel that leaves output strictly partial. Ran 3/3 green. The
+  `tests/ExtractGui.Tests.ps1` that was deleted in the previous pass is replaced by this suite;
+  deleting a hanging test and claiming the branch was covered was wrong.
+- Two real defects surfaced while writing those tests and are now fixed: `VerifyExtractedOutput`
+  initialised `reason` to a non-empty value, which made every verification return early as
+  “aborted”, and the enumeration walk followed junctions, which could certify files outside the
+  output directory as extracted output.
+- Gate 792/792 over 13 suites (0 failed, 0 skipped, 0 pending); `git diff --check` exit 0.
+  Hook-free production build `6031E2B04C0739F7E7D80113D5DF03508BAB1962D7336B64003DC9C207DB27C5`
+  (1445376 bytes, no hook marker present in the binary) passed the four-scenario smoke, and the
+  installed copy now carries exactly that hash; the previous build
+  `7D933A46B706D088026A18DD0084EC967F62E29FB3BC60DA479B9285D9CAC413` is backed up at
+  `C:\Tool\SmartZip\SmartZip.exe.bak-gui-reliability-20260920-185150` and the INI was never
+  modified (`DDCC1A739F63700699E040095ECE3CEE39F3B4DCC9C5B18C67EE4824E7EE96A4`).
+  Restore command and full evidence: `QODER_HANDOFF.md`, section
+  「四项复审缺口修复、真实 7zG 回归与本机部署」.
+- Still open by choice, not by oversight: `-aou` renames and `excludeArgs` / `codePage` keep the
+  verdict conservative instead of promoting; a solid archive can only be cancelled at the block
+  end, so that one case still rests on the hand measurement rather than an automated one.
+
+## Fix — extraction verdict and per-process evidence (2026-09-20)
+
+- Implemented the diagnosed fix. Production source, library and tests were edited; no
+  staging, no commit, no push, and **no deployment** this turn, so the installed
+  `C:\Tool\SmartZip\SmartZip.exe` is still `7D933A46B706D088026A18DD0084EC967F62E29FB3BC60DA479B9285D9CAC413`
+  and `SmartZip.ini` is still `DDCC1A739F63700699E040095ECE3CEE39F3B4DCC9C5B18C67EE4824E7EE96A4`.
+  The user's archive, split members, extraction directory and password note were never opened;
+  no archive EXE was executed and the 10 GB sample was not re-run.
+- Design settled before code, on the evidence in DECISIONS: GUI `exit 2` covers a
+  warned-complete run, a corrupt run and a cancelled run alike (measured 2, 2, 2), so no exit
+  code can certify extraction. The verdict therefore comes from the written output, item by
+  item, by size and CRC-32 from `7z l -slt`; a hard source-test result always wins; a promoted
+  run is only `OK_WITH_WARNING`. A generic `2 -> success` mapping is not used anywhere.
+- `lib/ArchiveDiagnostics.ahk`: added `ExtractionVerdict`, `VerifyExtractedOutput`,
+  `ParseArchiveListing`, `Crc32OfFileHex` (streaming `ntdll!RtlComputeCrc32`) and
+  `CountWrittenFiles`; `ArchiveResult` gained `verifyExitCode`, `verifyOutput`, `outputCheck`.
+  `RtlComputeCrc32` over `c-clean\a.bin` reproduces 7-Zip's listed `CRC = 52F52622` and all six
+  fixture files matched the listing, so the oracle is anchored to 7-Zip's own checksums.
+- `SmartZip.ahk`: `ExtractArchiveToTemp` keeps the extract process's exit code as its own,
+  classifies the follow-up console `t` as stage `verify`, records it in `verifyExitCode` /
+  `verifyOutput`, leaves `result.output` empty for the extract stage, and takes its status from
+  `ExtractionVerdict`. The output proof runs only for an ambiguous code and only when
+  `excludeArgs` and `codePage` are empty. `WriteDiagnostic`, the GUI text and the rotating log
+  now label the source-test block (`verify (source test) exitCode=` / `output:`, plus
+  `outputCheck=`), so an exit code can never be read next to another run's `Everything is Ok`.
+- Red first, then green, per behaviour:
+  - Oracle tests: 6 labels in `Sfxv.Integration.Tests.ps1`. Teeth proven by mutation -
+    forcing `verified := true` failed exactly `oracle_rejects_damaged_output`,
+    `oracle_rejects_missing_output` and `oracle_rejects_unexpected_output` (4 failures
+    including the aggregate), then the mutation was reverted (`grep -c MUTATION` = 0).
+  - Verdict tests: 8 labels. With a stub reproducing today's behaviour (everything ambiguous
+    becomes `UNKNOWN_ERROR`) the run gave `total=99 passed=92 failed=7`, failing precisely the
+    six contracts that behaviour violates while `verdict_unverified_never_promoted` and
+    `verdict_exit_one_stays_unknown` already passed. After the real implementation: 99/99.
+  - Damage-detection proof that the source test cannot substitute for output evidence:
+    corrupting one written byte while the archive stays intact yields `mismatched=1` and no
+    promotion; a missing item yields `missing=1`; an extra renamed file yields `unexpected=1`.
+- Full gate, 12 suites, each asserting total/passed/failed/skipped/pending against the expected
+  count: 184, 193, 15, 98, 39, 30, 53, 36, 1, 1, 99, 10 → **759 passed / 0 failed / 0 skipped
+  / 0 pending**, `SUM_EXPECTED=759`, script exit 0. `git diff --check` exit 0.
+- Production build in `%TEMP%\smartzip-prod-build-20260920-124426` (only `SmartZip.ahk`,
+  `lib\ArchiveDiagnostics.ahk`, `ico.ico`; no `tests` directory), with staged-source
+  byte-equality, zero hook references and exactly one ArchiveDiagnostics include asserted
+  before compiling. Ahk2Exe exit 0, artifact 1440768 bytes,
+  SHA-256 `529E5F10B2551BDB0791023C3DA114C5B31D198B9EAFDA9E6FB6EE0513F600C3`, and a byte scan
+  of the EXE found no `IntegrationTestHook`. Not deployed.
+- Hook-free production smoke on that exact artifact: `Passed=True`, `LeakedProcessCount=0`,
+  `RedactionOk=True`, and all four scenarios passed - `valid`, `crcPartial` (exactly one
+  isolated partial directory), `splitMissing`, `encryptedHeader` - with no timeouts. So the
+  new verdict path did not disturb the quarantine or redaction behaviour.
+- Two self-inflicted regressions were caught by the existing gate and are worth recording,
+  because both were invisible to the SFXV suite: an unbraced `if (check != "")` after a
+  line-continuation rewrite threw on every clean extraction (surfacing as 8
+  `crcPartial ... timed out after 120s` failures plus a stalled SFXV run), and a bare
+  `name (args)` in AHK v2 is a method call, not concatenation. Fixed with an explicit block
+  and `.` concatenation. `SmartZip.Static`'s exit-1 matcher was aligned to its new home in
+  `ExtractionVerdict` and now also asserts the promotion ceiling, so the safeguard is pinned
+  rather than dropped.
+- Not finished, stated plainly: automated coverage of the real 7zG branch. A temporary
+  `tests/ExtractGui.Tests.ps1` drove the **clean** scenario through real 7zG end to end
+  (`exit 0`, status `OK`, per-file provenance labels green), but the **warned** dialog could
+  not be dismissed reliably from an external watcher or from an in-process `SetTimer`, so the
+  file was deleted instead of being left as a timing-out suite. Mid-run cancel likewise stays
+  manual-only evidence (interrupted at 3.2 % of a 1.34 GB job, `exit 2`). `hideRunSize`
+  both-sides equivalence is asserted nowhere executable today; the rule is size-independent by
+  construction, but that is reasoning, not a test.
+- Residual limits of this fix: CRC-32 is the strength 7-Zip itself verifies with, not a
+  cryptographic guarantee; a cancellation that lands after the final byte is written will
+  verify complete and report `OK_WITH_WARNING`, which is the same outcome as closing a finished
+  dialog; and the oracle is deliberately unavailable when `excludeArgs`/`codePage` are set, so
+  those configurations keep the old conservative failure.
+
+## Investigation — SFXV “extra data” reported as UNKNOWN_ERROR (2026-09-20, no code changed)
+
+- Scope of this turn: reproduce and diagnose only. No production code edited, no build, no
+  deploy, no staging, no commit/push. Installed `SmartZip.exe` is still
+  `7D933A46B706D088026A18DD0084EC967F62E29FB3BC60DA479B9285D9CAC413` and the INI is untouched.
+- User facts: extraction had finished and the “有额外数据” window was closed by hand; it was
+  not a mid-run cancel. Redacted diagnostic: `status=UNKNOWN_ERROR stage=extract exitCode=2`
+  with output that belongs to a `Testing archive: archive.7z` run, `Tail Size=1529`,
+  `Method=Copy 7zAES`, `Everything is Ok`, `Archives with Warnings: 1`.
+- Fixture (self-built, TEMP only, never the user's archive): 6 files across nested dirs,
+  `-mx=0 -mhe=on` (Copy + 7zAES), split as `game.exe` + `game.NNN.sfxv`, then merged the way
+  `SfxvInput` merges (128-byte stub stripped) so the result is the real 7z stream plus
+  **1529 trailing bytes**. Physical Size 4129185, tail delta verified exactly 1529.
+- Measured on 7-Zip 26.02 ZS:
+
+  | archive | `7z.exe x` (console) | `7zG.exe x` (GUI) | files written | SHA-256 matched |
+  |---|---|---|---|---|
+  | clean, no tail | exit 0 | exit 0, exits by itself, no lingering dialog | 6/6 | 6/6 |
+  | +1529 tail | exit 0 + warning text | **exit 2** | 6/6 | **6/6 (complete)** |
+  | 1 byte flipped | exit 2 + `CRC Failed in encrypted file` | **exit 2** | 6 | **5/6 (real damage)** |
+
+- The dismissal mechanism is irrelevant: clicking the Close button (`BM_CLICK` id=2),
+  `WM_COMMAND`, `WM_CLOSE`, `WM_SYSCOMMAND SC_CLOSE`, Esc and Enter all returned **exit 2**
+  with 6/6 files intact. So “closing the warning window causes 2” is the wrong framing: 7zG's
+  completion code for a warned run *is* 2; the dialog only controls when the process exits.
+- Why it reaches the classifier at all: `Run7z`'s first parameter selects the binary
+  (`is7z ? 7z.exe : 7zG.exe`, SmartZip.ahk:1156) and `ExtractArchiveToTemp` passes `hideBool`
+  (= `FileGetSize(path)/1024/1024 < hideRunSize`, :1636). A 10.16 GB archive therefore extracts
+  through **7zG**, while small archives — every fixture in the suite — go through console
+  `7z.exe`, where the same warning yields exit 0. The defect is size-dependent by construction,
+  which is why 744 green tests cannot see it. `tests/Sfxv.Integration.Tests.ps1`'s
+  `Host.Run7z` always uses console 7z.exe, so it models only the small-archive branch.
+- Classification measured against a hash-verified copy of the real library
+  (`Classify7zResult`, inputs = the console text above):
+
+  | exit | with the `t` text attached | with the GUI's own (empty) text |
+  |---|---|---|
+  | 0 | OK_WITH_WARNING, mayDeleteSource=0 | **OK, isCleanSuccess=1, mayDeleteSource=1** |
+  | 1 | OK_WITH_WARNING | UNKNOWN_ERROR |
+  | 2 | **UNKNOWN_ERROR** (matches the report) | UNKNOWN_ERROR |
+  | 255 | CANCELLED | CANCELLED |
+
+  The ladder only grants warning-success at exit 0 and exit 1, so 7zG's 2 falls through to
+  `UNKNOWN_ERROR`. Consequence read from source: not OK/OK_WITH_WARNING →
+  `FinalizeExtraction` (:1719) quarantines the complete output into
+  `<name>_解压不完整_<stamp>` and writes the diagnostic; `mayDeleteSource=false`, so the source
+  survives. The user-visible damage is a false failure plus a wrongly-labelled folder, not
+  data loss.
+- Reporting defect confirmed (Codex's read is right): `ExtractArchiveToTemp` stores the GUI
+  code in `extractExit` (:1642) and then classifies with `cap.output` from a *different*
+  console `7z t` process (:1651-1652, :1681), so a stage=extract/exitCode=2 result carries
+  “Testing archive … Everything is Ok”. Static text of another process also feeds the
+  hard-error detail paths, so an extract can be labelled from a run that never extracted.
+- **Trap for whoever fixes it**: simply “stop attaching the `t` output” is unsafe. The exit-0
+  row above shows an empty extract text turns a warned-but-complete run into `OK` with
+  `mayDeleteSource=1`, i.e. it would newly allow source recycling. The extract stage needs a
+  real verdict source, not merely less text.
+- Not proven (deliberately not assumed): the genuine mid-run 7zG cancel code. Pausing the job
+  ~100 ms into a 1.34 GB run did not stop it (the write completed), so no true mid-run abort
+  was observed; whether `exitCode=255 → CANCELLED` (:1645) is reachable through 7zG at all is
+  still unknown. Also untested: other 7zG warning classes, and whether the user's real tail is
+  the same kind of trailing data (its `Tail Size=1529` matches the synthetic case).
+- Suggested minimal fix, in priority order (not applied this turn):
+  1. Give the extract stage its own oracle: for the GUI branch treat exit 2 as *indeterminate*
+     and resolve it from (a) the post-extract console `t` **and** (b) an output-side inventory —
+     every non-directory entry from `7z l -slt` present with matching size (hash small outputs
+     only). All-present + clean-or-warning `t` → `OK_WITH_WARNING`; anything else →
+     `DATA_CORRUPT`/partial. Never promote from `t` text alone, and never blanket-map 2→success
+     (the corrupt row proves 2 also means real damage).
+  2. Keep per-process provenance in the result (`extractText` vs `verifyText`) and have
+     `WriteDiagnostic` label which process each block came from.
+  3. Product decision for the user, not an agent's: `hideRunSize` silently switches both the
+     UI *and* the exit-code contract. Either normalise on console `7z.exe x` with SmartZip's own
+     progress window, or record in DECISIONS that the GUI branch's codes differ.
+  4. Preserve `isCleanSuccess=false` / `mayDeleteSource=false` for every indeterminate outcome.
+- Regression tests to add with such a fix: `Classify7zResult` cases for (2, warning-only) and
+  (2, empty); a provenance assertion that an extract result cannot carry `t` text; a
+  `Host.Run7z` that mirrors production's binary choice so the GUI branch is finally exercised;
+  a trailing-data fixture crossing the `hideRunSize` boundary and expecting the *same* status on
+  both sides; and file count + hash checks instead of trusting `t` for completeness.
+- Evidence lives in `%TEMP%\szx-taildiag-20260920-030128` (`dismiss-*.log`, `controls-*.log`,
+  `cancel-*.log`, `midrun-*.log`, `classify.txt`, `console-text-*.txt`). The multi-gigabyte
+  fixtures and this session's 7zG test windows were removed afterwards.
+- Harness note for the GUI test above: dismiss 7zG's dialog with **PostMessage**, not
+  `SendMessageW(BM_CLICK)`. The synchronous send blocks the caller indefinitely on that dialog
+  and hung two of my runs; a finished 7zG job also never exits on its own, so any test needs an
+  explicit dismissal step plus a bounded wait, and must own only its own PIDs.
+
+## Full regression, production build and local deployment — 2026-09-20
+
+- User authorization for this turn replaced the earlier no-deploy limit: run the complete
+  gate, build the production artifact in an isolated TEMP tree, run the hook-free production
+  smoke, and only then update `C:\Tool\SmartZip\SmartZip.exe`. All five stages passed, so the
+  install was updated. No new features, no source-archive changes, no user password read, no
+  user archive EXE executed, no staging added, no commit, no push.
+- Stage A — full gate, 12 suites, each asserting total/passed/failed/skipped/pending against
+  the expected count: 184, 193, 15, 98, 39, 30, 53, 36, 1, 1, 84, 10 → **744 passed /
+  0 failed / 0 skipped / 0 pending**, script exit 0.
+- Stage B — production compile in `%TEMP%\smartzip-prod-build-20260920-023700` holding only
+  `SmartZip.ahk`, `lib\ArchiveDiagnostics.ahk` and `ico.ico` (no `tests` directory).
+  Pre-compile assertions: staged source byte-equal to repository `SmartZip.ahk`, zero
+  `IntegrationTestHook` references, zero `#Include *i tests` injections, exactly one
+  `#Include lib\ArchiveDiagnostics.ahk`. `Ahk2Exe /in ... /out ... /base AutoHotkey64.exe
+  /silent` exit 0, output present. Built artifact 1436160 bytes,
+  SHA-256 `7D933A46B706D088026A18DD0084EC967F62E29FB3BC60DA479B9285D9CAC413`; a byte scan of
+  the compiled EXE found no `IntegrationTestHook` string. A prior run of the same source at
+  `023542` produced the identical hash, so the compile is reproducible for this tree.
+- Stage C — hook-free production smoke of that exact built file. The first attempt failed in
+  my own wiring, not in the product: I piped the fixture generator's returned object through
+  `Out-String` into the manifest path, which is formatted text rather than JSON, so
+  `ConvertFrom-Json` rejected it. Corrected to use the generator's own `ManifestPath`; the
+  suite then reported `Passed=True`, `LeakedProcessCount=0`, `RedactionOk=True` with all four
+  scenarios passing (`valid`, `crcPartial`, `splitMissing`, `encryptedHeader`); `crcPartial`
+  produced exactly one isolated partial directory, the others produced none, no scenario
+  timed out, and the process-only fixture password appeared in neither manifest nor report.
+- Stage D — deployment. Before any write: no `SmartZip`/`Contextmenu`/7z process was running
+  and an exclusive open of the target succeeded, so nothing was interrupted or killed.
+  Previous installed bytes `06F7966340274672777239281B8B8EA7BE5F103BB99CC7B2A5432282DFF616A7`
+  (1435648 bytes, written 2026-09-17 15:08:51) matched the record. Backup created first and
+  hash-verified before the install: `C:\Tool\SmartZip\SmartZip.exe.bak-sfxv-reliability-20260920-023829`
+  (unique name asserted absent beforehand; its `LastWriteTime` still reads 2026-09-17 because
+  the copy preserves it, `CreationTime` is 2026-09-20 02:38:29). `SmartZip.ini` SHA-256
+  `DDCC1A739F63700699E040095ECE3CEE39F3B4DCC9C5B18C67EE4824E7EE96A4`, mtime 2026-09-16
+  14:49:40, identical before and after. Only `SmartZip.exe` was replaced; installed SHA-256 now
+  equals the smoke-tested build hash, and the install-directory listing confirms it was the
+  only file with a fresh write time.
+- Stage E — the deployed bytes were copied to TEMP (the smoke driver deliberately refuses any
+  path under `C:\Tool\SmartZip`) and the same four-scenario hook-free smoke passed again on
+  that copy: `Passed=True`, `LeakedProcessCount=0`, `RedactionOk=True`, 4/4 scenarios, with the
+  installed EXE and INI re-hashed afterwards and unchanged. Rollback logic was armed but not
+  needed.
+- Restore method if ever required: exit the running SmartZip tray process first, then
+  `Copy-Item 'C:\Tool\SmartZip\SmartZip.exe.bak-sfxv-reliability-20260920-023829' 'C:\Tool\SmartZip\SmartZip.exe' -Force`
+  and confirm the result hashes to `06F7966…16A7`. The INI was never part of either artifact.
+- Cleanup: the gate rewrites `tests/RunCmdCapture.Fragment.ahk` (tracked) and regenerates
+  `tests/PasswordPreflight.Fragment.ahk` (untracked); both were confirmed clean at task start
+  and were restored from the committed blob and removed again. Final `git status --short` is
+  11 modified + 3 untracked, `git diff --cached` is empty (staging state preserved as found),
+  `git diff --check` exits 0. Both compiled sources predate the 02:37 build:
+  `SmartZip.ahk` 2026-09-17 15:01:18, `lib/ArchiveDiagnostics.ahk` 2026-09-19 09:12:58.
+- Still not measured: no large-archive benchmark ran, so there is still no speed figure for
+  this build. Deployment is verified by contract tests plus the four hook-free scenarios, not
+  by timing.
+
+## Qoder implementation — 2026-09-19 (SFXV reliability follow-up)
+
+- Sole editor: Qoder, per the user's authorization of all three planned items and
+  of this worktree (Codex stopped editing). Plan:
+  `docs/superpowers/plans/2026-09-19-sfxv-reliability-followup.md`. Red was run
+  before green for every item. Nothing was committed, pushed or deployed, and the
+  eight pre-existing dirty files were preserved.
+- Two blocking defects had to be fixed before any red/green evidence was possible,
+  both in the harness rather than in extraction behaviour:
+  1. `tests/Sfxv.Integration.Tests.ps1` was the only non-ASCII `.ps1` saved without
+     a UTF-8 BOM, so Windows PowerShell 5.1 decoded it with the ANSI codepage and
+     its own `'        ;解压嵌套'` slice anchor no longer matched. The suite
+     therefore registered **1 test with 1 failure** (`Missing zipx pipeline`), not
+     the 67 recorded in the handoff. Fixed by adding the BOM; `[IO.File]` byte
+     comparison confirmed `payload-identical-except-BOM=True` (12148 to 12151 bytes).
+  2. `Start-Process -PassThru` does not populate `ExitCode` in this environment, so
+     `ExitCode | Should Be 0` compared against empty. Reproduced on an unrelated
+     process: `cmd /c exit 7` gave `code=[]`, while `-Wait -PassThru` and
+     `[Diagnostics.Process]::Start` both gave the true code. Three suites shared
+     this dead crash gate: `Sfxv.Integration` (67/1 fail), `Sfxv.Tests` and
+     `DirectoryScanOptimization` (each 1 fail). All three now use one
+     `Invoke-AhkRunner` added to `tests/TestHelper.ps1`.
+  - Baseline after both fixes, before any new assertion: 67 passed / 0 failed.
+- Task 1 — harness results cannot be silently missing. Added
+  `tests/SfxvResultHelper.ps1` (`Assert-SfxvResults`, `Get-SfxvResultMap`) and
+  `tests/Sfxv.ResultContract.Tests.ps1` (10/10), covering the plan's six cases plus
+  an empty expected set, a truncated line, a blank line and the status map. The
+  integration suite now holds a hand-authored 76-label `$expectedLabels` set that is
+  never derived from `results.txt`, registers per-label tests from that set, and
+  registers the file-exists and label-completeness tests unconditionally.
+  - Red evidence: with the old registration, commenting out one `Check` gave
+    `TotalCount 66 / Passed 66 / Failed 0` — an assertion vanished while the suite
+    stayed green. With the new registration the same mutation gives
+    `TotalCount 69 / Failed 2`, naming `ordinary_formats_skip_sfxv_scan` twice.
+  - A harness that cannot launch (broken `#Include`) gives `TotalCount 69 / Failed 67`
+    and reports the real exit code `2`, instead of 6 tests and 1 failure.
+  - `SMARTZIP_SFXV_PASSWORD` is restored through `try/finally` to the inherited
+    value; verified with a preset sentinel (`after-suite=sentinel-original-value`).
+    A timeout kills only the runner process the suite started.
+- Task 2 — a failed preparation is reused inside its task. `SfxvInput` gained
+  `taskActive`, set by `SfxvTaskScope` after construction and cleared before the
+  previous owner is restored. `SfxvInputMatches` now requires the task to be active
+  and requires `!closed` only of a successful input, so a terminal failure is reused
+  while a cleaned success is not.
+  - Red: 7 failures, including 2 leaked `__smartzip_sfxv_*` directories, i.e. the
+    re-preparation really did redo full merges. Green at 76/76.
+  - Failure is induced by holding an exclusive handle on a fixture volume and then
+    releasing it, so a repeated preparation would succeed; no production hook.
+- Task 3 — cleanup is separate from closing and can be retried. `Close()` sets
+  `closed` first, deletes only the owned `archive.7z`, removes the directory with an
+  explicit non-recursive `DirDelete(dir, false)`, then derives `cleanupComplete` from
+  what still exists; a repeat call is skipped only once cleanup completed.
+  `SfxvTaskScope.Close()` restores ownership before attempting cleanup at most three
+  times with 50 ms in between, never re-merges, and reports a leftover through the
+  existing `Loging`/`RedactDiagnostic` path inside a `try`.
+  - Red: 4 failures (`cleanup_retry_done`, `empty_dir_removed_after_child_leaves`,
+    the aggregate and the alias-directory scan showing 2 leftovers).
+  - A `DirDelete(dir)` without the explicit flag was probed on this toolchain
+    (AutoHotkey 2.0.26): it throws on a non-empty directory and left both the child
+    file and the directory in place, so the unowned-file risk was latent, not live;
+    the explicit `false` now pins the guarantee instead of relying on the default.
+  - The single `scope_cleanup_bounded_retry` label failed once inside the full gate
+    while passing standalone, so it was split into `scope_retry_attempted`
+    (at least 80 ms of retries), `scope_retry_bounded` (under 3000 ms) and
+    `scope_leftover_kept` (path retained, ownership released). Reducing `Loop 3` to
+    `Loop 1` fails exactly `scope_retry_attempted`, which proves the retry count is
+    really measured; the timing bounds are the only load-sensitive assertions added.
+- Final verification, all commands run this turn:
+  - Full gate with explicit `FailedCount`/`SkippedCount`/expected-count checks per
+    suite: static 184, diagnostics 193, capture 15, password 98, lifecycle 39,
+    nesting 30, UI 53, real integration 36, directory scan 1, Sfxv recognition 1,
+    Sfxv integration 84, Sfxv result contract 10 — **744 passed / 0 failed / 0
+    skipped**, script threw on the earlier failing run and exited 0 on this one.
+  - The focused suite ran green three consecutive times at 84/84 while iterating.
+  - `git diff --check`: exit 0 (only the pre-existing LF/CRLF working-copy warnings).
+  - 7-Zip probe: `7-Zip 26.02 ZS v1.5.7 R1 (x64)`.
+- Boundaries respected: no commit/push/deploy; `C:\Tool\SmartZip\SmartZip.exe` still
+  hashes to `06F7966340274672777239281B8B8EA7BE5F103BB99CC7B2A5432282DFF616A7`
+  (written 2026-09-17, matching the handoff) and `SmartZip.ini` is unchanged
+  (2026-09-16); no archive EXE was executed and the user's sample and its password
+  note were not opened; production still has no `IntegrationTestHook` reference and
+  includes `lib\ArchiveDiagnostics.ahk` exactly once.
+- Changed files: `lib/ArchiveDiagnostics.ahk`, `tests/Sfxv.Integration.Tests.ps1`,
+  `tests/TestHelper.ps1`, `tests/Sfxv.Tests.ps1`,
+  `tests/DirectoryScanOptimization.Tests.ps1`, `tests/README.md`,
+  `docs/continuity/DECISIONS.md`, this file, plus new `tests/SfxvResultHelper.ps1`
+  and `tests/Sfxv.ResultContract.Tests.ps1`.
+- Cleanup: the gate regenerates `tests/RunCmdCapture.Fragment.ahk` (tracked, CRLF
+  rewrite) and `tests/PasswordPreflight.Fragment.ahk` (untracked). Both were
+  confirmed clean at task start and restored/removed after the last run; any future
+  test run recreates them. The suites still leave their own
+  `%TEMP%\SmartZip-SfxvIntegration-<guid>` roots behind; those were not swept, per
+  the rule against recursively deleting other runs' temporary directories.
+- Not done / remaining: no large-archive benchmark was run, so there is no measured
+  speed figure — avoiding repeat merges is an I/O reduction, not a proven gain.
+  Residual temporary files are still possible while another process holds the merge.
+  Deferred candidates from the handoff stay untouched: validating more than the
+  six-byte 7z signature, timing log rotation, progress/cancel during synchronous
+  merge, and a repeatable performance benchmark.
+
+## Qoder handoff preparation — 2026-09-19
+
+- User requested further review, a plan/history handoff, and implementation by Qoder.
+- Read `docs/continuity/QODER_HANDOFF.md` and
+  `docs/superpowers/plans/2026-09-19-sfxv-reliability-followup.md` next.
+- Scope: fail-closed test result validation, task-local failed preparation reuse,
+  and bounded retryable cleanup. Existing extraction behavior must remain intact.
+- Codex changed only handoff/planning documents this turn; existing eight dirty
+  files were preserved. Qoder becomes sole editor after task delivery.
+- Fresh baseline command: Invoke-Pester -Script './tests/Sfxv.Integration.Tests.ps1'
+  -PassThru -Quiet | Select-Object TotalCount,PassedCount,FailedCount,SkippedCount.
+  Exact result: TotalCount 67, PassedCount 67, FailedCount 0, SkippedCount 0; exit 0.
+- Full suite/build/deployment were not rerun this turn. Prior results below are historical.
+- Document verification: git diff --check exited 0 (LF/CRLF warnings only).
+- The plan exists locally under docs/superpowers, which .gitignore excludes;
+  preserve it for Qoder. No ignore rule or staging state was changed this turn.
+- Next verification: Qoder follows the plan's red/green gates.
+- Delivery status: documents prepared for dispatch; Qoder should record acceptance
+  and implementation results here. No claim of delegated implementation completion.
+
+## Current Task — SFXV task-scoped reuse
+
+- Baseline: 0f75a63; worktree was clean before this authorized optimization.
+- Completed: one owner per synchronous zipx task (including password retries).
+  Probe/test/extract borrow its merged input. Nested pre-probe owns an outer
+  scope so nested zipx can reuse it; different nested paths restore the previous
+  owner. All normal, cancelled, and exceptional exits release task ownership.
+- Ordinary RAR/numeric/ZIP names bypass SFXV sibling scanning. SFXV preparation
+  checks available bytes before creating temporary output, catches header I/O
+  errors, and verifies reads/writes and first-volume offsets during merging.
+- Timing: task-level merge duration is recorded separately as prepare.
+- Tests: Sfxv.Integration.Tests.ps1 initially failed three reuse assertions,
+  later failed no-space/offset and preparation-timing regressions as expected.
+  Latest focused run: 67 passed, 0 failed. Existing eight-suite gate passed
+  648/648; DirectoryScanOptimization and Sfxv recognition each passed 1/1.
+  Total: 717 passed, 0 failed. No large-user-archive benchmark was run.
+- Changed files: SmartZip.ahk, lib/ArchiveDiagnostics.ahk,
+  tests/Sfxv.Integration.Tests.ps1, tests/README.md, README.md, ini.md,
+  docs/continuity/ACTIVE_TASK.md, docs/continuity/DECISIONS.md.
+- Commands: Invoke-Pester -Script './tests/Sfxv.Integration.Tests.ps1'
+  -PassThru -Quiet: 67/0; production-only TEMP compilation: exit 0.
+- Gate command: foreach name in SmartZip.Static, ArchiveDiagnostics,
+  RunCmdCapture, PasswordPreflight, ExtractionLifecycle, NestingMigration,
+  DiagnosticUI, Real7Zip.Integration, DirectoryScanOptimization, Sfxv:
+  Invoke-Pester -Script ('./tests/' + name + '.Tests.ps1') -PassThru -Quiet.
+  Passed counts in order: 184, 193, 15, 98, 39, 30, 53, 36, 1, 1;
+  failures all zero, command exit 0. git diff --check: exit 0.
+- Generated RunCmdCapture fragment restored to its baseline; generated
+  PasswordPreflight fragment removed. No user files were removed.
+- Deployment: production-only TEMP build installed to C:\Tool\SmartZip\SmartZip.exe;
+  SHA-256 06F7966340274672777239281B8B8EA7BE5F103BB99CC7B2A5432282DFF616A7
+  matches the build. INI hash unchanged. Previous binary backed up to
+  C:\Tool\SmartZip\SmartZip.exe.bak-sfxv-reuse-20260917-151230.
+- Remaining: changes are uncommitted and not pushed. Implementation and local
+  deployment complete; optional matched large-archive timing benchmark.
+- Cancellation coverage is extraction cancellation; this change does not add
+  a user-facing cancellation control during synchronous preparation.
+
 ## Current Handoff — 2026-09-17
 
 - Goal: continue extraction-speed work without changing existing outcomes, and
@@ -25,8 +520,8 @@
   scan `1/1`, SFXV recognition `1/1`, and SFXV real 7-Zip integration `36/36`.
   `git diff --check` exited 0. The SFXV integration uses data-only fixtures
   and never executes an archive EXE.
-+- Deployment: final source compiled successfully with the staged AutoHotkey
-+  toolchain and installed as `C:\Tool\SmartZip\SmartZip.exe`. The deployed SHA-256 is
+- Deployment: final source compiled successfully with the staged AutoHotkey
+  toolchain and installed as `C:\Tool\SmartZip\SmartZip.exe`. The deployed SHA-256 is
   `C9EF0553D7FB4013B6233C60C6E0C6D20D0C2F139326573112061B43273FBEA3`; it
   matches the final temporary build. Existing executables were backed up as
   `C:\Tool\SmartZip\SmartZip.exe.bak-codex-20260917-033601` and

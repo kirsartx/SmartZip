@@ -36,32 +36,33 @@ class RunCmdCaptureHost {
         enc := Codepage
         if (enc = "UTF-8" || enc = "utf-8")
             enc := "UTF-8"
-        File := FileOpen(hPipeR, "h", enc)
-
-        ; Read until the process exits; never ProcessClose on output content.
+        ; Preserve raw bytes until EOF. Decoding each partial pipe read can
+        ; replace a split UTF-8 character before continuation bytes arrive.
+        captured := Buffer(65536, 0)
+        capturedSize := 0
+        exited := false
         loop {
-            still := DllCall("PeekNamedPipe", "Ptr", hPipeR, "Ptr", 0, "Int", 0, "Ptr", 0, "Ptr", 0, "Ptr", 0)
-            while !File.AtEOF {
-                chunk := File.Read(4096)
-                if (chunk != "")
-                    sOutput .= chunk
-                else
-                    break
-            }
-            if !DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 15) {
-                ; drain remaining bytes after exit
-                while !File.AtEOF {
-                    chunk := File.Read(4096)
-                    if (chunk != "")
-                        sOutput .= chunk
-                    else
-                        break
+            available := 0
+            readable := DllCall("PeekNamedPipe", "Ptr", hPipeR, "Ptr", 0, "UInt", 0,
+                "Ptr", 0, "UInt*", &available, "Ptr", 0)
+            if (readable && available > 0) {
+                count := Min(available, 65536)
+                if capturedSize + count + 2 > captured.Size
+                    captured.Size := Max(captured.Size * 2, capturedSize + count + 2)
+                if DllCall("ReadFile", "Ptr", hPipeR, "Ptr", captured.Ptr + capturedSize,
+                    "UInt", count, "UInt*", &received := 0, "Ptr", 0) && received > 0 {
+                    capturedSize += received
+                    continue
                 }
-                break
             }
-            if !still && !DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 0) {
+            ; Always recheck/drain the pipe after observing process exit.
+            if exited
                 break
-            }
+            exited := DllCall("WaitForSingleObject", "Ptr", hProcess, "UInt", 15) = 0
+        }
+        if capturedSize {
+            NumPut("UShort", 0, captured, capturedSize)
+            sOutput := StrGet(captured.Ptr, capturedSize, enc)
         }
 
         if !DllCall("GetExitCodeProcess", "Ptr", hProcess, "UIntP", &ec := 0)
@@ -78,5 +79,5 @@ class RunCmdCaptureHost {
         return { exitCode: exitCode, output: sOutput, cancelled: cancelled }
     }
 
-    ;https://www.autohotkey.com/boards/viewtopic.php?t=93944
+    ;https://www.autohotkey.com/boards/viewtopic.php?t=93944
 }

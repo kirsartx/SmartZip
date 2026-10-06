@@ -35,6 +35,11 @@ class ArchiveResult {
         this.isCleanSuccess := (status = ArchiveStatus.OK)
         this.mayDeleteSource := (status = ArchiveStatus.OK)
         this.output := output
+        ; Evidence from the follow-up source test belongs to that process, not to the
+        ; extract process, so it is kept in fields of its own.
+        this.verifyExitCode := -1
+        this.verifyOutput := ""
+        this.outputCheck := ""
         this.outputState := "none"
         this.passwordRetryEligible := false
         this.encryptionEvidence := false
@@ -474,6 +479,83 @@ DetectVolumeGroup(path, siblingNames) {
 ; A .exe + .NNN.sfxv set is a byte-split self-extracting archive. 7-Zip does
 ; not support opening a 7z archive from stdin, so the SFX stub is removed into
 ; a temporary 7z file. Original pieces are never changed or removed.
+AcquireSfxvInput(host, path) {
+    if host.HasOwnProp("sfxvTaskInput") && SfxvInputMatches(host.sfxvTaskInput, path)
+        return SfxvBorrowedInput(host.sfxvTaskInput)
+    return SfxvInput(path)
+}
+
+SfxvInputMatches(input, path) {
+    if (!IsObject(input) || !input.taskActive)
+        return false
+    if !(StrLower(path) = StrLower(input.originalPath)
+        || (input.volumeFirst != "" && StrLower(path) = StrLower(input.volumeFirst)))
+        return false
+    ; A preparation that already failed is terminal for the task: its status is
+    ; reused without another scan or merge. Only a successful input still has a
+    ; temporary file, so only that one has to stay open to be borrowed.
+    return input.status != "" || !input.closed
+}
+
+class SfxvBorrowedInput {
+    __New(input) {
+        for name in ["commandPath", "status", "volumeFirst", "missingVolumes"]
+            this.%name% := input.%name%
+    }
+    Close() {
+        ; The enclosing synchronous task owns the file.
+    }
+}
+
+class SfxvTaskScope {
+    __New(host, path) {
+        this.host := host
+        this.previous := host.HasOwnProp("sfxvTaskInput") ? host.sfxvTaskInput : ""
+        this.hadPrevious := host.HasOwnProp("sfxvTaskInput")
+        this.input := ""
+        this.closed := false
+        if !SfxvInputMatches(this.previous, path) && IsSfxvNameCandidate(path) {
+            started := A_TickCount
+            this.input := SfxvInput(path)
+            ; The task, not the input's own cleanup state, decides how long the
+            ; preparation result stays reusable.
+            this.input.taskActive := true
+            host.sfxvTaskInput := this.input
+            if this.input.volumeFirst != ""
+                WriteOperationTiming(host, "prepare", started)
+        }
+    }
+    Close() {
+        if this.closed
+            return
+        this.closed := true
+        if IsObject(this.input) {
+            this.input.taskActive := false
+            if this.hadPrevious
+                this.host.sfxvTaskInput := this.previous
+            else
+                this.host.DeleteProp("sfxvTaskInput")
+            ; A temporary merge can stay open for a moment after 7-Zip exits.
+            ; Retrying the delete never re-prepares the archive.
+            Loop 3 {
+                this.input.Close()
+                if this.input.cleanupComplete
+                    break
+                if A_Index < 3
+                    Sleep 50
+            }
+            if !this.input.cleanupComplete
+                try this.host.Loging(RedactDiagnostic(
+                    "SFXV 临时文件未能删除: " this.input.directory), A_LineNumber, 1)
+        }
+    }
+}
+
+IsSfxvNameCandidate(path) {
+    SplitPath(path, &name)
+    return RegExMatch(name, "i)^.+\.(?:exe|\d{3}\.sfxv)$") != 0
+}
+
 class SfxvInput {
     __New(path) {
         this.originalPath := path
@@ -482,10 +564,20 @@ class SfxvInput {
         this.status := ""
         this.volumeFirst := ""
         this.missingVolumes := []
+        this.taskActive := false
         this.closed := false
+        this.cleanupComplete := false
 
+        try this.Prepare(path)
+        catch {
+            this.status := ArchiveStatus.IO_ERROR
+            this.Close()
+        }
+    }
+
+    Prepare(path) {
         SplitPath(path, , &dir)
-        if (!IsVolumeNameCandidate(path) || !DirExist(dir))
+        if (!IsSfxvNameCandidate(path) || !DirExist(dir))
             return
 
         names := []
@@ -505,6 +597,14 @@ class SfxvInput {
         offset := FindSfx7zOffset(group.firstPath)
         if (offset < 0) {
             this.status := ArchiveStatus.NOT_ARCHIVE
+            return
+        }
+
+        required := -offset
+        for member in group.members
+            required += FileGetSize(member)
+        if (required <= 0 || this.AvailableBytes(dir) < required) {
+            this.status := ArchiveStatus.IO_ERROR
             return
         }
 
@@ -532,14 +632,26 @@ class SfxvInput {
         }
     }
 
+    AvailableBytes(dir) {
+        if !DllCall("GetDiskFreeSpaceExW", "Str", dir, "Int64P", &available := 0,
+            "Ptr", 0, "Ptr", 0)
+            throw OSError()
+        return available
+    }
+
     Close() {
-        if this.closed
+        if this.cleanupComplete
             return
+        ; Closing ends borrowing at once; it does not assert the files are gone,
+        ; which a temporary file still open in another process can prevent.
         this.closed := true
-        if (this.commandPath != this.originalPath && this.commandPath != "")
+        ownsFile := this.commandPath != "" && this.commandPath != this.originalPath
+        if (ownsFile && FileExist(this.commandPath))
             try FileDelete(this.commandPath)
         if (this.directory != "" && DirExist(this.directory))
-            try DirDelete(this.directory)
+            try DirDelete(this.directory, false)
+        this.cleanupComplete := DirExist(this.directory) = ""
+            && (!ownsFile || FileExist(this.commandPath) = "")
     }
 }
 
@@ -547,6 +659,8 @@ MergeSfxvPieces(members, firstOffset, destination) {
     source := ""
     target := ""
     try {
+        if (!members.Length || firstOffset < 0 || firstOffset >= FileGetSize(members[1]))
+            return false
         target := FileOpen(destination, "w")
         if !target
             return false
@@ -557,8 +671,13 @@ MergeSfxvPieces(members, firstOffset, destination) {
                 throw Error("Cannot open SFXV volume")
             if (index = 1)
                 source.Pos := firstOffset
-            while (read := source.RawRead(ioBuf, ioBuf.Size)) > 0
-                target.RawWrite(ioBuf, read)
+            remaining := source.Length - source.Pos
+            while remaining > 0 {
+                read := source.RawRead(ioBuf, Min(ioBuf.Size, remaining))
+                if (read <= 0 || target.RawWrite(ioBuf, read) != read)
+                    throw Error("Incomplete SFXV copy")
+                remaining -= read
+            }
             source.Close()
             source := ""
         }
@@ -578,7 +697,8 @@ MergeSfxvPieces(members, firstOffset, destination) {
 FindSfx7zOffset(path) {
     file := FileOpen(path, "r")
     if !file
-        return -1
+        throw Error("Cannot read SFXV header")
+    try {
     size := Min(FileGetSize(path), 16 * 1024 * 1024)
     if (size < 6) {
         file.Close()
@@ -600,6 +720,9 @@ FindSfx7zOffset(path) {
             return pos
     }
     return -1
+    } finally {
+        file.Close()
+    }
 }
 
 WriteOperationTiming(host, operation, started) {
@@ -609,6 +732,379 @@ WriteOperationTiming(host, operation, started) {
     if host.HasOwnProp("scriptDirOverride") && host.scriptDirOverride != ""
         logPath := host.scriptDirOverride "\SmartZip-timing.log"
     try FileAppend(operation " duration_ms=" (A_TickCount - started) "`r`n", logPath, "UTF-8")
+}
+
+; Output-side integrity evidence for an extraction. A 7-Zip process exit code cannot
+; separate a warned-but-complete run from a corrupted or cancelled one (measured: the GUI
+; returns 2 for all three), so the verdict comes from what was actually written, checked
+; against the archive's own per-item size and CRC-32. Anything unprovable returns
+; verified=false; this function never upgrades a result on its own.
+VerifyExtractedOutput(host, archivePath, outputDir, password := "") {
+    report := {verified: false, reason: "", summary: "", items: 0, files: 0,
+        dirs: 0, checked: 0, mismatched: 0, missing: 0, noChecksum: 0, unexpected: 0,
+        aborted: "", listingExit: -1}
+    try {
+        if !DirExist(outputDir) {
+            report.reason := "output directory absent"
+            return report
+        }
+        rootFull := NormalizedFullPath(outputDir)
+        if (rootFull = "") {
+            report.reason := "output directory could not be normalized"
+            return report
+        }
+        if PathHasReparsePoint(rootFull) {
+            report.reason := "output directory or ancestor is a reparse point"
+            return report
+        }
+        cmd := host.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' archivePath '"'
+        cap := host.RunCmdCapture(cmd, "UTF-8")
+        report.listingExit := IsObject(cap) ? cap.exitCode : -1
+        if (report.listingExit != 0) {
+            report.reason := "listing process exited " report.listingExit
+            return report
+        }
+        listing := ValidateArchiveListing(IsObject(cap) ? cap.output : "", archivePath)
+        if (!listing.ok) {
+            report.reason := listing.reason
+            return report
+        }
+        expectedFiles := Map()
+        for item in listing.items {
+            report.items++
+            if !IsSafeRelativeEntryPath(item.path) {
+                report.reason := "listing entry path is not a safe relative path"
+                return report
+            }
+            target := outputDir "\" item.path
+            targetFull := NormalizedFullPath(target)
+            if (targetFull = "" || SubStr(targetFull, 1, StrLen(rootFull) + 1) != rootFull "\") {
+                report.reason := "listing entry resolves outside the output directory"
+                return report
+            }
+            if PathHasReparsePoint(targetFull) {
+                report.reason := "listing entry is a reparse point"
+                return report
+            }
+            if item.isDir {
+                report.dirs++
+                if !DirExist(targetFull)
+                    report.missing++
+                continue
+            }
+            expectedFiles[StrLower(StrReplace(item.path, "/", "\"))] := true
+            report.files++
+            if !FileExist(targetFull) || _IsDirectory(targetFull)
+                continue
+            if (FileGetSize(targetFull) != item.size) {
+                report.mismatched++
+                continue
+            }
+            if (item.checksum = "") {
+                ; 7z omits CRC for empty files. Existence, regular-file identity
+                ; and exact zero length prove their content without a checksum.
+                if (item.size = 0)
+                    report.checked++
+                else
+                    report.noChecksum++
+                continue
+            }
+            actual := Crc32OfFileHex(targetFull)
+            if (actual = "" || actual != item.checksum)
+                report.mismatched++
+            else
+                report.checked++
+        }
+        writtenFiles := Map()
+        CollectWrittenFiles(outputDir, rootFull, writtenFiles, report)
+        if (report.aborted != "") {
+            report.reason := report.aborted
+            report.summary := "aborted during enumeration"
+            return report
+        }
+        ; Compare the two sets, not their sizes: one missing and one extra must not cancel out.
+        for rel in writtenFiles {
+            if !expectedFiles.Has(rel)
+                report.unexpected++
+        }
+        for rel in expectedFiles {
+            if !writtenFiles.Has(rel)
+                report.missing++
+        }
+        if (report.mismatched)
+            report.reason := "size or CRC mismatch"
+        else if (report.missing)
+            report.reason := "listed item was not written"
+        else if (report.noChecksum)
+            report.reason := "no checksum for a listed file"
+        else if (report.unexpected)
+            report.reason := "output holds files the archive does not list"
+        else if !report.checked
+            report.reason := "nothing verified"
+        else
+            report.verified := true
+        report.summary := ("checked=" report.checked "/" report.files " dirs=" report.dirs
+            " mismatched=" report.mismatched " missing=" report.missing
+            " no-checksum=" report.noChecksum " unexpected=" report.unexpected)
+        return report
+    } catch as failure {
+        ; A verification that cannot be completed is a conservative failure, never an error
+        ; that escapes and bypasses the caller's failure isolation.
+        report.verified := false
+        report.reason := "verification failed: " failure.Message " (line " failure.Line ")"
+        report.summary := "aborted"
+        return report
+    }
+}
+
+_IsDirectory(path) {
+    return InStr(FileExist(path), "D") != 0
+}
+
+CollectWrittenFiles(dir, rootFull, sink, report) {
+    if PathHasReparsePoint(dir) {
+        report.aborted := "output directory or ancestor is a reparse point"
+        return
+    }
+    Loop files dir "\*", "F" {
+        full := NormalizedFullPath(A_LoopFileFullPath)
+        if (full = "") {
+            report.aborted := "written file could not be normalized"
+            return
+        }
+        if (SubStr(full, 1, StrLen(rootFull) + 1) != rootFull "\") {
+            report.aborted := "written file resolves outside the output directory"
+            return
+        }
+        if (IsReparsePoint(full)) {
+            report.aborted := "written file is a reparse point"
+            return
+        }
+        rel := SubStr(full, StrLen(rootFull) + 2)
+        key := StrLower(rel)
+        if sink.Has(key) {
+            report.aborted := "output filename collision"
+            return
+        }
+        sink[key] := true
+    }
+    Loop files dir "\*", "D" {
+        ; Descending into a link would read files that the extraction never wrote,
+        ; so a reparse directory ends the walk instead.
+        if (IsReparsePoint(A_LoopFileFullPath)) {
+            report.aborted := "output holds a reparse point directory"
+            return
+        }
+        CollectWrittenFiles(A_LoopFileFullPath, rootFull, sink, report)
+        if (report.aborted != "")
+            return
+    }
+}
+
+ParseArchiveListing(text) {
+    items := []
+    cur := ""
+    started := false
+    Loop Parse text, "`n", "`r" {
+        line := Trim(A_LoopField)
+        if (!started) {
+            if (line = "----------")
+                started := true
+            continue
+        }
+        if SubStr(line, 1, 6) = "Path =" {
+            cur := {path: Trim(SubStr(line, 7)), size: 0, checksum: "", isDir: false,
+                hasSize: false, hasAttr: false}
+            items.Push(cur)
+            continue
+        }
+        if !IsObject(cur)
+            continue
+        if SubStr(line, 1, 6) = "Size =" {
+            sizeText := Trim(SubStr(line, 7))
+            cur.hasSize := RegExMatch(sizeText, "^\d+$") != 0
+            if cur.hasSize
+                cur.size := sizeText + 0
+        } else if SubStr(line, 1, 5) = "CRC =" {
+            cur.checksum := StrUpper(Trim(SubStr(line, 6)))
+        } else if SubStr(line, 1, 12) = "Attributes =" {
+            attr := Trim(SubStr(line, 13))
+            cur.isDir := SubStr(attr, 1, 1) = "D"
+            cur.hasAttr := true
+        }
+    }
+    return items
+}
+
+Crc32OfFileHex(path) {
+    file := ""
+    try file := FileOpen(path, "r")
+    if !file
+        return ""
+    ; FileOpen auto-detects text BOMs even before RawRead. CRC covers every byte.
+    file.Pos := 0
+    crc := 0
+    buf := Buffer(4 * 1024 * 1024, 0)
+    try {
+        Loop {
+            read := file.RawRead(buf, buf.Size)
+            if (read <= 0)
+                break
+            crc := DllCall("ntdll\RtlComputeCrc32", "UInt", crc, "Ptr", buf.Ptr, "UInt", read, "UInt")
+        }
+    } catch as e {
+        file.Close()
+        throw Error("Crc32OfFileHex failed", -1, e)
+    }
+    file.Close()
+    hex := StrUpper(Format("{1:x}", crc))
+    while (StrLen(hex) < 8)
+        hex := "0" hex
+    return hex
+}
+
+; The extract process's own exit code is the only evidence about that process, and the GUI
+; front-end returns 2 for a warned-but-complete run, a corrupted run and a cancelled run
+; alike. So an ambiguous code is resolved by decision: a hard result from the source test
+; or a user break always wins, and promotion needs proven output integrity. A promoted run
+; is still only OK_WITH_WARNING, so it never looks like a clean success.
+ExtractionVerdict(extractExit, verifyStatus, outputVerified, usedGui) {
+    if (extractExit = 255)
+        return ArchiveStatus.CANCELLED
+    if (verifyStatus != ArchiveStatus.OK && verifyStatus != ArchiveStatus.OK_WITH_WARNING)
+        return verifyStatus
+    if (extractExit = 0)
+        return verifyStatus
+    ; Promotion is limited to the one ambiguity that was measured: 7zG returns 2 for a run
+    ; that finished with a trailing-data warning, while the console build returns 0 for the
+    ; same archive. Any other code - a console 2, a launch failure, a usage, memory, or
+    ; request-unsupported error, or an unassigned -1 - stays a failure even if the output
+    ; happens to verify, because nothing about it was measured as recoverable.
+    if (usedGui && extractExit = 2 && outputVerified)
+        return ArchiveStatus.OK_WITH_WARNING
+    return ArchiveStatus.UNKNOWN_ERROR
+}
+
+; Listing structure and text are a separate process's output, so they are validated before
+; anything is believed. Returns {ok, reason, items}.
+ValidateArchiveListing(text, archivePath) {
+    result := {ok: false, reason: "", items: []}
+    if (text = "" || !InStr(text, "Path = ")) {
+        result.reason := "empty listing"
+        return result
+    }
+    if (RegExMatch(text, "im)^(\s*)ERROR:\s|Cannot open|Can'?t open as archive|Is not archive")) {
+        result.reason := "listing reports an error"
+        return result
+    }
+    headerEnd := InStr(text, "`n----------")
+    if (!headerEnd) {
+        result.reason := "listing has no item separator"
+        return result
+    }
+    header := SubStr(text, 1, headerEnd)
+    if (!RegExMatch(header, "im)^Type\s*=\s*\S")) {
+        result.reason := "listing header has no archive type"
+        return result
+    }
+    if (!RegExMatch(header, "im)^Path\s*=\s*" . EscapeLiteral(String(archivePath)) . "\s*$")) {
+        result.reason := "listing header does not name the queried archive"
+        return result
+    }
+    items := ParseArchiveListing(text)
+    if !items.Length {
+        result.reason := "listing names no items"
+        return result
+    }
+    seen := Map()
+    seen.CaseSense := false
+    for item in items {
+        entryKey := StrReplace(item.path, "/", "\")
+        if (entryKey = "" || seen.Has(entryKey)) {
+            result.reason := seen.Has(entryKey) ? "listing repeats an entry" : "listing entry without a path"
+            return result
+        }
+        seen[entryKey] := true
+        if (!item.HasOwnProp("hasSize") || !item.hasSize) {
+            result.reason := "listing entry without a size"
+            return result
+        }
+        if (!item.HasOwnProp("hasAttr") || !item.hasAttr) {
+            result.reason := "listing entry without attributes"
+            return result
+        }
+        if (!item.isDir && item.size != 0 && item.checksum = "") {
+            result.reason := "listing file entry without a checksum"
+            return result
+        }
+        if !IsSafeRelativeEntryPath(item.path) {
+            result.reason := "listing entry path is not a safe relative path"
+            return result
+        }
+    }
+    result.ok := true
+    result.items := items
+    return result
+}
+
+EscapeLiteral(s) {
+    out := ""
+    Loop Parse s {
+        ch := A_LoopField
+        out .= InStr("\.*+?^${}()|[]", ch) ? "\" ch : ch
+    }
+    return out
+}
+
+; Absolute, UNC, device, stream and traversal shapes are all refused: reading through them
+; would leave the output directory.
+IsSafeRelativeEntryPath(path) {
+    if (path = "" || InStr(path, ":") || InStr(path, "\\") || InStr(path, "//"))
+        return false
+    if (SubStr(path, 1, 1) = "\" || SubStr(path, 1, 1) = "/")
+        return false
+    for part in StrSplit(path, "\") {
+        if (part = "" || part = "." || part = "..")
+            return false
+    }
+    for part in StrSplit(path, "/") {
+        if (part = "" || part = "." || part = "..")
+            return false
+    }
+    return true
+}
+
+NormalizedFullPath(path) {
+    need := DllCall("kernel32\GetFullPathNameW", "Str", path, "UInt", 0, "Ptr", 0, "Ptr", 0)
+    if (need = 0 || need > 32767)
+        return ""
+    buf := Buffer(need * 2 + 2, 0)
+    if !DllCall("kernel32\GetFullPathNameW", "Str", path, "UInt", need + 1, "Ptr", buf.Ptr, "Ptr", 0)
+        return ""
+    return RTrim(StrGet(buf.Ptr, "UTF-16"), "\")
+}
+
+IsReparsePoint(path) {
+    attr := DllCall("kernel32\GetFileAttributesW", "Str", path, "UInt")
+    if (attr = 0xFFFFFFFF)
+        return false
+    return (attr & 0x400) != 0
+}
+
+; GetFullPathNameW is lexical only. Check every component before reading content,
+; including the output root and its ancestors, not just the final listed file.
+; This protects a stable tree; it is not an atomic defense against concurrent changes.
+PathHasReparsePoint(path) {
+    current := path
+    while current != "" {
+        if IsReparsePoint(current)
+            return true
+        SplitPath(current, , &parent)
+        if (parent = current)
+            break
+        current := parent
+    }
+    return false
 }
 
 _VolEscape(s) {

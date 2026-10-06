@@ -53,13 +53,9 @@ ExitApp(0)
         $scriptPath = Join-Path $temp 'scan.ahk'
         $resultPath = Join-Path $temp 'result.txt'
         [IO.File]::WriteAllText($scriptPath, $program, [Text.UTF8Encoding]::new($true))
-        $process = Start-Process -FilePath (Resolve-AhkExe) -ArgumentList @(
-            '/ErrorStdOut', ('"' + $scriptPath + '"'), ('"' + $resultPath + '"')) -PassThru -NoNewWindow
-        if (-not $process.WaitForExit(30000)) {
-            $process.Kill()
-            throw 'Volume comparison timed out'
-        }
-        $process.ExitCode | Should Be 0
+        $exitCode = Invoke-AhkRunner -ScriptPath $scriptPath -ScriptArguments @($resultPath) `
+            -TimeoutMessage 'Volume comparison timed out'
+        $exitCode | Should Be 0
         (Get-Content -Raw $resultPath) | Should Be 'comparisons=120'
     }
 }

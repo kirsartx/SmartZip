@@ -22,3 +22,33 @@ function Resolve-Ahk2Exe {
     }
     return $null
 }
+
+# Run an .ahk script and return its real exit code.
+# Start-Process -PassThru leaves ExitCode empty under Windows PowerShell 5.1, which turns
+# every "exit code must be 0" gate into a comparison against nothing.
+function Invoke-AhkRunner {
+    param(
+        [string] $ScriptPath,
+        [string[]] $ScriptArguments = @(),
+        [int] $TimeoutMs = 30000,
+        [string] $TimeoutMessage = 'AutoHotkey runner timed out'
+    )
+    $quoted = @('/ErrorStdOut', ('"' + $ScriptPath + '"'))
+    foreach ($a in $ScriptArguments) { $quoted += ('"' + $a + '"') }
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = Resolve-AhkExe
+    $psi.Arguments = $quoted -join ' '
+    $psi.UseShellExecute = $false
+    $runner = [Diagnostics.Process]::Start($psi)
+    try {
+        if (-not $runner.WaitForExit($TimeoutMs)) {
+            # Only the process this call started is terminated.
+            try { $runner.Kill() } catch {}
+            try { $runner.WaitForExit(5000) } catch {}
+            throw $TimeoutMessage
+        }
+        return $runner.ExitCode
+    } finally {
+        $runner.Dispose()
+    }
+}
