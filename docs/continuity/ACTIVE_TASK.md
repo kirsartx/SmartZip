@@ -1,6 +1,35 @@
 # Active Task
 
-## Post-processing fast-path design awaiting review — 2026-10-06 (Codex)
+## Probe substage profiling design awaiting review — 2026-10-06 (Codex)
+
+- Current request: continue extraction-speed work by measuring the expensive
+  `probe` path before changing behavior. User approved the direction: time the
+  initial list capture/classifier separately, and time the conditional fallback
+  test separately, while preserving the aggregate `probe` label.
+- Evidence: on the controlled 13,367-zero-byte-file / 689-directory archive,
+  SmartZip `probe` took 5,235 / 5,500 / 4,203 ms (median 5,235); direct `7z l -slt`
+  took 64 / 52 / 53 ms and emitted 2,031,082 characters. This points to SmartZip
+  capture/classification overhead but does not yet distinguish the two. No code
+  change for this follow-up has started.
+- Written bilingual design: `docs/superpowers/specs/2026-10-06-probe-substage-profiling-design.md`.
+  It preserves command/result/status behavior and specifies fixed-label,
+  `timingLog`-gated timings plus tests, build, smoke, and matched benchmark.
+- Worktree before this documentation change: branch
+  `agent/diagnostic-ui-contract-repair`, ahead of origin by 3; existing uncommitted
+  source/tests/docs changes from prior profiling and fast-path work are preserved.
+  Three generated validation roots remain under `%TEMP%`; their names are recorded
+  in the preceding task section. Do not stage or commit those existing changes.
+- Commands/results: read the continuity/decision docs, README, test instructions,
+  relevant `ProbeArchive`, `Classify7zResult`, and `RunCmdCapture` code; `git status`
+  showed the pre-existing modified files. Direct list benchmark command was run
+  three times; exit 0 each time, 64/52/53 ms, output length 2,031,082 each. Run
+  `git diff --check` after this documentation edit; tests are not rerun because
+  no executable code changed.
+- Next gate: user reviews this written design. After approval, make a focused
+  implementation plan, add failing tests first, then add only opt-in substage
+  timings. Do not optimize parsing until these timings locate the dominant cost.
+
+## No-op post-processing fast path implemented; verification recorded — 2026-10-06 (Codex)
 
 - Goal: improve SmartZip smoothness without changing extraction outcome, placement,
   source-retention, password, or settings behavior. User approved the umbrella design
@@ -23,25 +52,43 @@
   source `test` median 31 ms, follow-up `source_test` median 32 ms. Each output had
   exactly 13,367 files and 689 directories. This is a count-stress proxy, not a
   10 GB throughput claim.
-- User approved the evidence-based candidate: when all per-file rename/delete rules
-  are empty, skip `AfterUnzip` for regular files while retaining directory processing
-  and empty-folder cleanup. The targeted design is now documented at
-  `docs/superpowers/specs/2026-10-06-afterunzip-noop-fast-path-design.md`.
-  Implementation has not started; the written design review is the next gate.
+- User approved the bilingual design at
+  `docs/superpowers/specs/2026-10-06-afterunzip-noop-fast-path-design.md`. Implemented
+  the no-op fast path: cache whether any of the three rename maps or `deleteExp` has
+  entries, query once for each usable extraction, and skip regular-file callbacks
+  only when all are empty. Directory entries still use `AfterUnzip`, preserving
+  empty-folder cleanup; configured rules retain the original per-entry traversal.
 - Changed tracked files: `SmartZip.ahk`, `tests/Sfxv.Integration.Tests.ps1`,
   `tests/SmartZip.Static.Tests.ps1`, `tests/README.md`, `ini.md`, this file. The
   implementation plan is at `docs/superpowers/plans/2026-10-06-extraction-performance-profiling.md`
   (ignored by repository rules). Test-generated `PasswordPreflight.Fragment.ahk`
   and both temporary profiling roots were removed after all processes exited.
-- Commands/results: focused Pester 141/141 and 188/188; documented 13-suite gate
-  813/813; hook-free Ahk2Exe build exit 0; production smoke 4/4, leak count 0,
-  redaction true; three-run matched count-stress benchmark above; `git diff --check`
-  exit 0 before this handoff edit (rerun afterward). No commit or push of profiling
-  code was made; current branch is `agent/diagnostic-ui-contract-repair`. For this
-  documentation-only change, run `git diff --check`; executable suites are not rerun.
-- Next step after written design review: TDD tests proving the
-  no-rules fast path, configured rename/delete rules, empty directory cleanup, and
-  nested extraction; rerun the 813-test gate, production smoke, and same workload.
+- Commands/results for this optimization: TDD red run with exactly the two new
+  tests failing (188 passed / 2 failed), then static Pester 190/190. Full documented
+  13-suite serial gate: 815/815, zero failed/skipped/pending/inconclusive. Hook-free
+  production compile exit 0; smoke scenarios valid, crcPartial, splitMissing and
+  encryptedHeader passed (4/4), leaked processes 0, redaction true. Three matched
+  SmartZip runs on a 13,367-zero-byte-file / 689-directory archive produced exact
+  counts in each run and the same output inventory SHA-256
+  `72A6F583333EC7DB40354EF59C29509751724D8538990566F8158ED924E7DBD9`:
+  wall ms `14788 / 15242 / 13581` (median `14788`); postprocess ms
+  `766 / 766 / 735` (median `766`). Against the prior matched baseline medians
+  (wall `16340`, postprocess `1219`), this is about 9.5% lower wall time and 37.2%
+  lower postprocess time. These are single-machine count-stress results, not a
+  general throughput guarantee. A preliminary invocation without a pre-created
+  output directory failed its inventory check and is excluded. Rerun
+  `git diff --check` after this continuity update.
+  The initial full-gate wrapper also used unsupported `-Show None` under the
+  installed Pester 3.4; rerunning without that option completed the 815/815 gate.
+  Current branch is `agent/diagnostic-ui-contract-repair`; no commit, push, or
+  deployment was made in this optimization turn. Existing profiling changes remain
+  in the working tree.
+- The test-generated `tests/PasswordPreflight.Fragment.ahk` was removed. Three
+  generated validation roots remain under `%TEMP%` because the local shell safety
+  policy rejected recursive cleanup: `SmartZip-fastpath-validation-359299a205c343bc9ee95b9e77dd0f87`,
+  `SmartZip-fastpath-validation-85e967cef1614d91b46bc0b7f4ce9711`, and
+  `SmartZip-fastpath-benchmark-eb5cf2cf18a1472e92c3ac3af826aee2`.
+- Remaining: review the final diff; do not push or deploy unless requested.
 
 ## Real SFXV warning fix verified; GitHub publication in progress — 2026-10-06 (Codex)
 
