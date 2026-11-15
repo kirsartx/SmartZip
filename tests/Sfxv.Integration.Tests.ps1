@@ -143,6 +143,7 @@ class Host {
     muilt := true
     cancelExtract := false
     throwCapture := false
+    forceExtractExitCode := 0
     BuildPasswordCandidates(path) => ["deliberately-wrong", EnvGet("SMARTZIP_SFXV_PASSWORD")]
     ShowDiagnostic(result, rest*) => result
     FinalizeExtraction(path, result, rest*) => result
@@ -159,13 +160,22 @@ class Host {
             this.exitCode := 255
             return
         }
-        this.exitCode := RunWait(this.7z ' ' action ' "' path args, , "Hide")
+        actualExitCode := RunWait(this.7z ' ' action ' "' path args, , "Hide")
+        this.exitCode := (action = 'x' && this.forceExtractExitCode != 0)
+            ? this.forceExtractExitCode : actualExitCode
     }
 __METHODS__
 __CAPTURE__
 }
 Check(value, label) {
     FileAppend(label "=" (value ? "PASS" : "FAIL") "`n", A_Args[2], "UTF-8")
+}
+HasTimingLabel(lines, label) {
+    for line in lines {
+        if RegExMatch(Trim(line), "^" label " duration_ms=\d+$")
+            return true
+    }
+    return false
 }
 MarkStep(m) {
     FileAppend(A_TickCount " " m "`n", A_Args[1] "\progress.txt", "UTF-8")
@@ -228,11 +238,17 @@ for kind in ["plain", "encrypted", "warning"] {
     tested := h.TestArchive(selected, password)
     Check(tested.status = (kind = "warning" ? ArchiveStatus.OK_WITH_WARNING : ArchiveStatus.OK), kind "_test")
     Check(tested.archivePath = first, kind "_test_identity")
+    if (kind = "warning") {
+        h.forceExtractExitCode := 2
+        h.hideRunSize := 0
+    }
     extracted := h.ExtractArchiveToTemp(selected, password, root "\" kind "\output")
+    h.forceExtractExitCode := 0
+    h.hideRunSize := 999
     Check(extracted.status = (kind = "warning" ? ArchiveStatus.OK_WITH_WARNING : ArchiveStatus.OK), kind "_extract")
     Check(extracted.archivePath = first, kind "_extract_identity")
     Check(FileExist(root "\" kind "\output\payload.bin"), kind "_payload")
-    routed := h.commands.Length = 4
+    routed := h.commands.Length = (kind = "warning" ? 5 : 4)
     for cmd in h.commands
         routed := routed && InStr(cmd, "archive.7z") && !InStr(cmd, "game.exe") && !InStr(cmd, ".sfxv")
     Check(routed, kind "_routes_list_test_extract_finaltest")
@@ -581,6 +597,16 @@ if junctionReady {
     Check(false, "oracle_ancestor_refused_before_crc")
 }
 
+timingLines := StrSplit(Trim(FileRead(A_ScriptDir "\SmartZip-timing.log")), "`n")
+Check(HasTimingLabel(timingLines, "7z_extract"), "timing_7z_extract")
+Check(HasTimingLabel(timingLines, "source_test"), "timing_source_test")
+Check(HasTimingLabel(timingLines, "output_verify"), "timing_output_verify")
+offDir := A_ScriptDir "\timing-off"
+DirCreate(offDir)
+offHost := {timingLog: false, scriptDirOverride: offDir}
+WriteOperationTiming(offHost, "extract", A_TickCount - 25)
+Check(!FileExist(offDir "\SmartZip-timing.log"), "timing_disabled_no_file")
+
 Check(true, "harness_tail_completed")
 } catch as tailError {
     ; A runtime error used to surface only as a suite timeout with no information at all.
@@ -648,6 +674,7 @@ $expectedLabels = @(
     'oracle_empty_rejects_nonempty_output','oracle_empty_rejects_missing_output',
     'oracle_empty_rejects_directory_output','oracle_refuses_noninteger_zero_size',
     'oracle_refuses_root_junction','oracle_refuses_root_ancestor_junction','oracle_ancestor_refused_before_crc',
+    'timing_7z_extract','timing_source_test','timing_output_verify','timing_disabled_no_file',
     'harness_tail_completed',
     'timing_enabled'
 )
@@ -674,7 +701,7 @@ Describe 'SFXV real 7-Zip production methods' {
     }
     It 'writes only operation and duration in timing logs' {
         $lines = Get-Content (Join-Path $root 'SmartZip-timing.log')
-        foreach ($line in $lines) { $line | Should Match '^(prepare|probe|test|extract) duration_ms=\d+$' }
+        foreach ($line in $lines) { $line | Should Match '^(prepare|probe|probe_list_capture|probe_list_classify|probe_fallback_test|test|extract|7z_extract|source_test|output_verify|postprocess) duration_ms=\d+$' }
     }
     It 'records task preparation duration separately from borrowed operations' {
         $lines = Get-Content (Join-Path $root 'SmartZip-timing.log')

@@ -1,5 +1,31 @@
 # Cross-Model Decisions
 
+## No-rule post-process enumeration (2026-11-16)
+
+- With all four rule families empty, post-processing enumerates directories only
+  (`loop files "DR"`) and still calls `AfterUnzip` for each directory. Any rule
+  family keeps the full `loop files "RDF"` walk. Empty-directory removal stays
+  inside `AfterUnzip` and stays pre-order.
+
+## Reviewed sequential improvements (2026-11-06)
+
+- Treat technical `Key = Value` records and `Listing/Testing/Extracting archive:`
+  path announcements as data, not diagnostic phrases. Continue extracting archive
+  type and probe `Encrypted = +` evidence, and retain actual message priority.
+  Reserved Error/Errors/Error Type and Warning/Warnings properties are diagnostics,
+  even with the same equals-sign formatting; do not filter them out.
+- Request a 1 MiB buffer only for `RunCmdCapture`; retry system-default pipe size
+  if the larger allocation fails, and return exit -1 if neither pipe can be made.
+  Keep byte-exact collection, decode-once UTF-8 and the 15 ms wait loop.
+- Capture/password fragments are generated in unique TEMP stages, never in the
+  checkout. A fresh result file and exit 0 are independent requirements. Test stages
+  may be recursively removed only after validating their parent and generated name.
+- Synthetic test INI files use the same UTF-16 encoding as the production smoke
+  writer. A standalone UTF-8-BOM fixture caused a startup failure and was excluded;
+  the matching UTF-16 fixture passed without a production-source change.
+- Keep this implementation in the existing branch with its prior changes preserved;
+  no commit, push or installed EXE/INI replacement is part of this request.
+
 ## Output proof edge cases (2026-10-06)
 
 - 7z may omit CRC for zero-length regular files. Accept only when size parses as an
@@ -50,6 +76,18 @@ The `DiagnosticUIHost` test double mirrors production `IsArchive` semantics: `Sp
 - Preserve the final post-extract `7z t` and all existing password, volume, isolation, source-recycle, nesting, status, error, and result behavior.
 - Do not add a cross-run cache, concurrency, 7-Zip parameter tuning, GUI or CLI changes, or production hooks for this optimization.
 - Do not record secrets, passwords, session IDs, or raw logs in continuity records.
+
+## Probe Substage Timing (2026-10-06)
+
+- Preserve aggregate `probe` timing and add fixed labels `probe_list_capture`
+  (initial listing process output capture), `probe_list_classify` (classification
+  of that output), and conditional `probe_fallback_test` (fallback `7z t` capture
+  plus classification).
+- Use the existing `timingLog` gate and fixed-label/integer-duration format. Do not
+  log paths, archive names, commands, output, or passwords.
+- Instrumentation must not change command arguments/order, classification, status,
+  or fallback conditions. Consider classifier optimization only after split timings
+  identify the dominant cost and a matched benchmark confirms improvement.
 
 ## Directory Scan Optimization (2026-09-16)
 

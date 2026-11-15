@@ -779,14 +779,10 @@ function Invoke-DiagnosticUICase {
     [System.IO.File]::WriteAllText($jsonPath, $Json, [System.Text.UTF8Encoding]::new($true))
     if (Test-Path -LiteralPath $outPath) { Remove-Item -LiteralPath $outPath -Force }
     $harness = Join-Path $StageDir 'DiagnosticUI.Harness.ahk'
-    $p = Start-Process -FilePath $script:AhkExe -ArgumentList @($harness, $Command, $jsonPath, $outPath, $CaseKey) `
-        -Wait -PassThru -NoNewWindow
-    if ($p.ExitCode -ne 0 -and -not (Test-Path -LiteralPath $outPath)) {
-        throw "AHK harness failed for $CaseKey exit=$($p.ExitCode)"
-    }
-    if (-not (Test-Path -LiteralPath $outPath)) {
-        throw "No output for $CaseKey"
-    }
+    Invoke-AhkResultRunner -ScriptPath $harness -ScriptArguments @($Command, $jsonPath, $outPath, $CaseKey) `
+        -ResultPath $outPath -WorkingDirectory $StageDir `
+        -StandardOutputPath (Join-Path $StageDir ($CaseKey + '.stdout.txt')) `
+        -StandardErrorPath (Join-Path $StageDir ($CaseKey + '.stderr.txt')) | Out-Null
     return Get-Content -LiteralPath $outPath -Raw -Encoding UTF8
 }
 
@@ -811,8 +807,7 @@ Describe 'DiagnosticUI' {
         if (-not (Test-Path -LiteralPath $script:AhkExe)) {
             throw "AutoHotkey not found: $script:AhkExe"
         }
-        $script:StageDir = Join-Path $env:TEMP ('SmartZip-DiagUI-' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $script:StageDir -Force | Out-Null
+        $script:StageDir = New-AhkTestStage -Name 'DiagUI'
         New-Item -ItemType Directory -Path (Join-Path $script:StageDir 'work') -Force | Out-Null
         Copy-Item -LiteralPath $script:HarnessSrc -Destination (Join-Path $script:StageDir 'DiagnosticUI.Harness.ahk') -Force
         $script:ProductPath = Export-DiagnosticUIProductFragment `
@@ -822,7 +817,7 @@ Describe 'DiagnosticUI' {
 
     AfterAll {
         if ($script:StageDir -and (Test-Path -LiteralPath $script:StageDir)) {
-            try { Remove-Item -LiteralPath $script:StageDir -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+            Remove-AhkTestStage $script:StageDir
         }
     }
 

@@ -1,33 +1,211 @@
 # Active Task
 
-## Probe substage profiling design awaiting review — 2026-10-06 (Codex)
+## No-rule post-process walk measured — 2026-11-16
 
-- Current request: continue extraction-speed work by measuring the expensive
-  `probe` path before changing behavior. User approved the direction: time the
-  initial list capture/classifier separately, and time the conditional fallback
-  test separately, while preserving the aggregate `probe` label.
-- Evidence: on the controlled 13,367-zero-byte-file / 689-directory archive,
-  SmartZip `probe` took 5,235 / 5,500 / 4,203 ms (median 5,235); direct `7z l -slt`
-  took 64 / 52 / 53 ms and emitted 2,031,082 characters. This points to SmartZip
-  capture/classification overhead but does not yet distinguish the two. No code
-  change for this follow-up has started.
-- Written bilingual design: `docs/superpowers/specs/2026-10-06-probe-substage-profiling-design.md`.
-  It preserves command/result/status behavior and specifies fixed-label,
-  `timingLog`-gated timings plus tests, build, smoke, and matched benchmark.
-- Worktree before this documentation change: branch
-  `agent/diagnostic-ui-contract-repair`, ahead of origin by 3; existing uncommitted
-  source/tests/docs changes from prior profiling and fast-path work are preserved.
-  Three generated validation roots remain under `%TEMP%`; their names are recorded
-  in the preceding task section. Do not stage or commit those existing changes.
-- Commands/results: read the continuity/decision docs, README, test instructions,
-  relevant `ProbeArchive`, `Classify7zResult`, and `RunCmdCapture` code; `git status`
-  showed the pre-existing modified files. Direct list benchmark command was run
-  three times; exit 0 each time, 64/52/53 ms, output length 2,031,082 each. Run
-  `git diff --check` after this documentation edit; tests are not rerun because
-  no executable code changed.
-- Next gate: user reviews this written design. After approval, make a focused
-  implementation plan, add failing tests first, then add only opt-in substage
-  timings. Do not optimize parsing until these timings locate the dominant cost.
+- Usable-output post-processing now uses `loop files "DR"` when `AfterUnzip("", true)`
+  is false and keeps `loop files "RDF"` when it is true. `AfterUnzip` and the two
+  placement loops are unchanged.
+- Contract archive: 13,367 zero-byte files in `dir-000`..`dir-688`, plus `empty-dir`
+  and `nested\empty-child`. All six recorded runs: 13,367 files, 690 directories,
+  empty paths absent, `nested` present, inventory SHA-256
+  `B203A4B872100E90AB5E573F7B61BC0E980F4B63E976B2073C40BC2B3ADF162F`.
+- Baseline postprocess ms `1235 / 1281 / 1156` (median `1235`). Implemented
+  `1000 / 1047 / 985` (median `1000`). An earlier baseline invocation was interrupted
+  and is not included. Count-stress only; not a general extraction speedup.
+  No commit, push, or installed EXE/INI replacement.
+- Static suite 192/192 before the serial gate. Serial gate 851/851, zero
+  failed/skipped/pending. Counts: 9, 192, 211, 22, 99, 39, 30, 53, 36, 1, 1, 141,
+  10, 7. `git diff --check` exit 0.
+
+## Sequential improvements completed and verified — 2026-11-06 (Codex)
+
+- User authorized implementing the three reviewed items one at a time, then asked
+  to continue. Main agent edits this existing worktree; read-only review was delegated.
+  Plan: `docs/continuity/2026-11-06-improvements-plan.md` (bilingual). Prior source,
+  test and documentation changes plus the pre-existing untracked password fragment
+  are preserved. No commit, push or installed-app/INI replacement is authorized.
+- Item 1: classify technical records and path announcements as data, retaining type,
+  probe encryption and genuine diagnostics. TDD initially gave 195/205 (10 expected
+  failures), then 204/208 (four announcement/real-listing failures), then 208/208.
+  Independent review identified genuine `ERROR =` / `WARNING =` diagnostic fields;
+  primary 7-Zip List.cpp/Rar5Handler.cpp source was checked. Three new regressions
+  were RED 208/211 and GREEN 211/211 after preserving reserved diagnostic keys,
+  including missing-volume count and its priority over encryption metadata.
+- Item 2: `RunCmdCapture` requests a 1 MiB pipe, retries system default on failure,
+  and returns exit -1 if both fail. Existing byte collection/UTF-8/15ms polling
+  remain. Capture TDD was 17 passed / 3 failed (bulk read efficiency, fallback,
+  total allocation failure), then 20/20 behavioral assertions, real exit 0.
+- Item 3: unique TEMP stages for capture/password fragments and diagnostic/UI
+  results; bounded process helper; independent exit-zero/fresh-result checks;
+  constrained stage cleanup. Infrastructure TDD was 2/8 then 9/9 after adding a
+  stale-result case. Focused suites: infrastructure 9, capture 22, password 99,
+  diagnostics 211, UI 53 all green. Captured repository fragments were unchanged.
+- Windows PowerShell 5.1 compatibility reruns: infrastructure 9/9, capture 22/22,
+  password 99/99, and final diagnostics 211/211 (341 passed across focused runs,
+  zero failed). Initial complete serial gate passed 848/848 before the review
+  correction. The final 14-suite serial gate passed 851/851 after that correction,
+  zero failed/skipped/pending. Counts in order: 9,192,211,22,99,39,30,53,36,1,1,141,10,7.
+- Matched real-listing benchmark (4,096 files, 128 directories, 603,415 characters):
+  baseline capture ms `2219 / 2140 / 2125`; implemented `47 / 47 / 47`, medians
+  2140 and 47. Reads 139 versus 10 each run. All six output hashes were
+  `71FA4B8F8056D4BB424D9B1AF466BBB41B6243396937017B3663750624DA9524`.
+  `Measure-ImplementedCapture.ps1 -Repo <repo>` and CSV are under the previous
+  review TEMP root. This is capture-only, not a whole-extraction speedup claim.
+- Final hook-free build is staged below
+  `%TEMP%\SmartZip-Implemented-20261106-22bf96cf1e0d451ca9369269c198fd73`:
+  `SmartZip-final.exe`, Ahk2Exe exit 0, SHA-256
+  `65FEF754AD5D63B634A1E9E2B5D1027F1E6CA6ACC99DBAAEA015F17C6BEE4590`.
+  Earlier build in that root is superseded. Four production smoke scenarios passed:
+  valid, crcPartial, splitMissing and encryptedHeader; zero leaked processes and
+  redaction true. Compiled full extraction of `Headers Error.7z` containing
+  `Data Error.txt` also passed, exactly one output with matching content hash and
+  source preserved. The standalone filename test initially used UTF-8-BOM INI,
+  unlike the project's UTF-16 smoke configuration; that invalid setup was excluded,
+  and the UTF-16 rerun passed. No production change was made for that setup error.
+- Review follow-up found no remaining high/medium issue in the reserved diagnostic
+  key correction. Reviewers made no edits. Intended files changed this turn:
+  `SmartZip.ahk`, `lib/ArchiveDiagnostics.ahk`, diagnostics/capture/password/UI test
+  wrappers, `tests/RunCmdCapture.Harness.ahk`, `tests/TestHelper.ps1`, new
+  `tests/TestInfrastructure.Tests.ps1`, test README and continuity docs/plan.
+  Prior unrelated profiling/static/SFXV/INI edits remain preserved. In particular,
+  `tests/RunCmdCapture.Fragment.ahk` has no diff; the pre-existing password fragment
+  was not overwritten or removed.
+- Exact verification commands: `Invoke-Pester -Script <suite> -Quiet -PassThru`
+  serially over the 14 suites/counts in tests/README (851/851); Windows PowerShell
+  5.1 focused runs of infrastructure/capture/password/diagnostics (9/22/99/211);
+  `Measure-ImplementedCapture.ps1 -Repo <repo>` (six exact-hash runs);
+  hook-free Ahk2Exe `/in <source-final> /out <SmartZip-final.exe> /base <AHK64>
+  /silent` (exit 0); `Invoke-ProductionSmartZipSmoke.ps1` (4/4, Passed true,
+  LeakedProcessCount 0, RedactionOk true); `ProductionSmokeUI.ahk` filename case
+  (runner exit 0, driver ok, one exact-hash output, source preserved).
+- Implementation is complete. Preserve this uncommitted branch/worktree for review;
+  no commit, push, merge or installed EXE/INI deployment was performed. Final
+  `git diff --check` passed (exit 0, line-ending warnings only); source/staging hashes
+  matched and no owned validation processes remained. New files had no trailing whitespace.
+
+## Optimization review with fresh evidence — 2026-11-06 (Codex)
+
+- User request: inspect the project for worthwhile optimizations. This turn reviewed
+  source/tests and ran isolated diagnostic experiments; production source, installed
+  EXE/INI and user archives were unchanged. Existing eight tracked modifications and
+  the untracked `tests/PasswordPreflight.Fragment.ahk` were preserved. Branch at start:
+  `agent/diagnostic-ui-contract-repair`, ahead 4.
+- Prioritized review: `docs/continuity/2026-11-06-optimization-review.md` (bilingual).
+  First fix filename-triggered false diagnostics, then implement the experimentally
+  supported pipe-buffer improvement, then strengthen test isolation/process gates.
+- New confirmed bug: clean real 7z listings all exited 0, but harmless filenames
+  `Wrong password.txt`, `Headers Error.txt`, `Data Error.txt` classified as password,
+  header and data failures; a trailing-data phrase filename caused a false warning.
+  `normal.txt` stayed OK. `Classify7zResult` treats `Path = ...` text as diagnostics.
+  Header/data false positives can block extraction; the password case can recover
+  through the existing successful empty-password test. Add regression cases first.
+- Fresh performance experiment: 4,096-file / 128-directory synthetic 7z, output
+  603,415 characters. Three interleaved capture runs per variant. Median ms:
+  default pipe 2,171; 64 KiB 203; 1 MiB 47; default pipe + 1ms polling 2,031;
+  direct process capture 47. Output hashes matched for every run. Independent
+  ~2 MiB emitter medians were 2,625 / 422 / 203 / 2,609 ms (direct 191 ms), with
+  exact split-UTF-8 output. These are capture-only numbers, not extraction speedups.
+- Commands/results: `Invoke-Pester -Script '.\tests\SmartZip.Static.Tests.ps1'
+  -Quiet -PassThru` => 192 passed, 0 failed/skipped/pending;
+  `Invoke-Pester -Script '.\tests\ArchiveDiagnostics.Tests.ps1' -Quiet -PassThru`
+  => 193 passed, 0 failed/skipped/pending. TEMP-staged existing capture harness
+  passed 15/15 and exit 0 for both original and 1 MiB pipe variants. No complete
+  817-test run, compile, production smoke or large real archive extraction this turn.
+- Reproduction artifacts remain below
+  `%TEMP%\SmartZip-review-20261106-0d3cf0ad0a954ca49ae63b8fa5580f6b`.
+  Commands are `Measure-Capture.ps1 -Repo <repo>`; same plus
+  `-ArchivePath <root>\listing-stress.7z` for real listing; and
+  `Check-FilenameClassification.ps1 -Repo <repo>` / `Check-CaptureContracts.ps1
+  -Repo <repo>`. The initial temporary wrapper naming error was corrected before
+  measurement; no failed launch is included in reported timings.
+- Test-infrastructure read-only review confirmed unbounded legacy launchers, shared
+  generated fragments/log paths and a UI harness exit check that accepts nonzero
+  exit when a result file exists. README has stale 655/656 and six-suite 596 prose
+  counts; current sums are 657/658 and 605. Full 817 arithmetic remains consistent.
+- Files intentionally changed this turn: this handoff and the new review report
+  only. `git diff --check` passed (exit 0; existing LF-to-CRLF warnings only), and
+  the review's process scan found no remaining owned AHK/SmartZip/7z process.
+  Retain the existing source/tests worktree for follow-up. No commit, push or deployment.
+
+## Probe substage profiling implemented and verified — 2026-10-06 (Codex)
+
+- Goal: split the slow `probe` diagnostic timing without changing archive
+  commands, order, classification, or results. User approved the approach and
+  requested routine choices follow the recommendation.
+- Added `probe_list_capture` around initial `RunCmdCapture`, `probe_list_classify`
+  around `Classify7zResult`, and conditional `probe_fallback_test` around fallback
+  `7z t` capture/classification. Aggregate `probe` timing remains on acquisition
+  failure and normal/finally paths. Existing `WriteOperationTiming` keeps all
+  labels gated by `timingLog`; logs contain only a fixed label and milliseconds.
+- Bilingual design: `docs/superpowers/specs/2026-10-06-probe-substage-profiling-design.md`.
+  Plan: `docs/superpowers/plans/2026-10-06-probe-substage-profiling.md` (ignored).
+  Stable contract recorded in `DECISIONS.md`.
+- TDD: before implementation static tests were `190 passed / 2 failed`, exactly
+  the two new missing-boundary assertions. Afterwards static passed `192/192` and
+  SFXV integration `141/141`.
+- Full serial 13-suite gate passed `817/817`, zero failed/skipped/pending. Counts:
+  static 192, diagnostics 193, capture 16, password 98, lifecycle 39, nesting 30,
+  UI 53, real 7-Zip 36, directory 1, SFXV recognition 1, SFXV integration 141,
+  result contract 10, GUI extraction 7. `git diff --check` exited 0 (only Git's
+  existing LF-to-CRLF working-copy warnings).
+- Hook-free build exited 0; SHA-256
+  `750F4FE55E67FD2EEEAD4D7738544F79D54FA6CC2827B92C2F094247F91B5E6F`.
+  Production smoke passed `valid`, `crcPartial`, `splitMissing`, and
+  `encryptedHeader`; zero leaked processes and redaction passed. Artifacts were
+  isolated below `%TEMP%`; installed executable, INI, and user archives untouched.
+- Exact verification: focused static 192/192; focused SFXV integration 141/141;
+  documented serial gate 817/817; diff check exit 0; hook-free Ahk2Exe exit 0;
+  production smoke `Passed=True`, four scenarios, `LeakedProcessCount=0`,
+  `RedactionOk=True`. An initial fixture invocation omitted the required
+  process-scoped test password and stopped before fixture generation; retry with
+  an ephemeral test-only value succeeded.
+- Tests/README.md reflects static 192, total 817, and the new probe labels. No
+  speedup claim: rerun the same matched stress archive and inspect capture versus
+  classify before considering parser changes. Existing prior fast-path/profile
+  edits remain preserved. Do not commit, push, deploy, or clean unrelated TEMP
+  roots without request.
+- Branch remains `agent/diagnostic-ui-contract-repair`. Alongside preceding
+  uncommitted edits, this follow-up changes `SmartZip.ahk`, static tests, SFXV
+  timing-label validation, test instructions, and continuity records.
+
+## Follow-up probe measurements — 2026-10-11 (Codex)
+
+- Continued the recommended same-archive profiling. Input archive was the existing
+  `%TEMP%\SmartZip-fastpath-benchmark-eb5cf2cf18a1472e92c3ac3af826aee2\count-stress.7z`,
+  SHA-256 `DC6F1A9E95B06086CFA66C7F260BE24FEF05D10A4880AFD867ACCBDC6EE231F6`.
+  It had previously been verified as 13,367 files / 689 directories. This follow-up
+  invoked `ProbeArchive` only, so it did not write a new extracted output inventory.
+- A temporary AHK harness extracted the production `ProbeArchive` and
+  `RunCmdCapture` methods, ran the same `7z l -slt` probe three times, and returned
+  `status=OK exit=0` each time. Results (ms):
+  - run 1: aggregate probe 2,078; list capture 1,781; classify 297;
+  - run 2: aggregate 4,016; capture 3,438; classify 578;
+  - run 3: aggregate 3,110; capture 2,688; classify 422.
+  Medians: probe 3,110 ms; capture 2,688 ms; classification 422 ms. The conditional
+  fallback was not taken. Median capture was about 86% of probe time, so a classifier
+  rewrite is not supported by this evidence.
+- A second throwaway instrumentation run split the `RunCmdCapture` pipe-drain loop
+  from `StrGet` conversion: pipe read/wait was 3,890 / 3,547 / 3,063 ms; conversion
+  reported 0 ms at `A_TickCount` resolution; classification was 610 / 594 / 578 ms.
+  This suggests the pipe pump/process-output path, not text decoding, is dominant.
+  It does not yet distinguish time waiting for 7-Zip from the number/cost of pipe
+  reads. Earlier direct-list measurements were 64 / 52 / 53 ms on this same stress
+  archive, but are not an app-to-app controlled comparison.
+- An application-level benchmark launch stayed in a SmartZip window without writing
+  timing logs. It was stopped after confirming the process belonged to this test.
+  Subsequent direct ProbeArchive harness runs succeeded. Two attempts at deeper
+  temporary harness instrumentation also timed out because the diagnostic timer
+  insertions were malformed; their AHK test processes were stopped, with no repo
+  source change. Do not treat those attempts as product failures or timing data.
+- Temporary roots created for these diagnostics remain under `%TEMP%`; no repository
+  artifacts were added. Worktree code remains unchanged from the verified profiling
+  implementation; `git status --short --branch` should be checked before any further
+  edit. `git diff --check` is the next verification after this handoff update.
+- Recommended next step: use a small throwaway harness to compare the existing
+  `CreatePipe` default buffer with a larger suggested buffer and record pipe-read
+  call counts/wait time on the same archive. Do not change production `RunCmdCapture`
+  until that isolated experiment demonstrates repeatable improvement and the UTF-8
+  split-byte / exit-code / cancellation regression contracts remain protected.
 
 ## No-op post-processing fast path implemented; verification recorded — 2026-10-06 (Codex)
 

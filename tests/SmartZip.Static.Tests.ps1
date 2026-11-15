@@ -1703,3 +1703,45 @@ Describe 'Kirs4ZipxOutcomeContract' {
         $ok | Should Be $true
     }
 }
+
+Describe 'ExtractionTimingBoundaries' {
+    It 'splits probe listing capture and classification while retaining aggregate timing' {
+        $script:SmartZipSource | Should Match '(?s)probeListCaptureStarted\s*:=\s*A_TickCount.{0,100}RunCmdCapture\(cmd,\s*"UTF-8"\).{0,120}WriteOperationTiming\(this,\s*"probe_list_capture",\s*probeListCaptureStarted\).{0,100}probeListClassifyStarted\s*:=\s*A_TickCount.{0,120}Classify7zResult\("probe".{0,120}WriteOperationTiming\(this,\s*"probe_list_classify",\s*probeListClassifyStarted\)'
+        $script:SmartZipSource | Should Match '(?s)WriteOperationTiming\(this,\s*"probe",\s*timingStarted\)'
+    }
+
+    It 'times fallback test capture and classification only on the conditional path' {
+        $script:SmartZipSource | Should Match '(?s)if \(result\.status = ArchiveStatus\.NOT_ARCHIVE\).{0,700}probeFallbackTestStarted\s*:=\s*A_TickCount.{0,120}RunCmdCapture\(tcmd,\s*"UTF-8"\).{0,120}Classify7zResult\("probe".{0,120}WriteOperationTiming\(this,\s*"probe_fallback_test",\s*probeFallbackTestStarted\)'
+    }
+
+    It 'times the selected 7-Zip extraction process with a fixed label' {
+        $script:SmartZipSource | Should Match '(?s)extractProcessStarted\s*:=\s*A_TickCount.{0,160}this\.Run7z\(.+?WriteOperationTiming\(this,\s*"7z_extract",\s*extractProcessStarted\)'
+    }
+
+    It 'times the follow-up source test with a fixed label' {
+        $script:SmartZipSource | Should Match '(?s)sourceTestStarted\s*:=\s*A_TickCount.{0,160}RunCmdCapture\(cmd,\s*"UTF-8"\).{0,120}WriteOperationTiming\(this,\s*"source_test",\s*sourceTestStarted\)'
+    }
+
+    It 'times output integrity verification only inside its existing gate' {
+        $script:SmartZipSource | Should Match '(?s)if\s*\(extractExit\s*!=\s*0\s*&&\s*this\.excludeArgs\s*=\s*""\s*&&\s*this\.codePage\s*=\s*""\)\s*\{\s*outputVerifyStarted\s*:=\s*A_TickCount\s*check\s*:=\s*VerifyExtractedOutput\(this,\s*commandPath,\s*tempDir,\s*password\)\s*WriteOperationTiming\(this,\s*"output_verify",\s*outputVerifyStarted\)'
+    }
+
+    It 'times usable-output post-processing in a finally block' {
+        $script:UnzipBody | Should Match '(?s)zipResult\.outputState\s*!=\s*"usable"\)\s*continue\s*postprocessStarted\s*:=\s*A_TickCount\s*try\s*\{.{0,6000}AfterUnzip\(.+?finally\s*\{\s*WriteOperationTiming\(this,\s*"postprocess",\s*postprocessStarted\)'
+    }
+}
+
+Describe 'AfterUnzipNoOpFastPath' {
+    It 'uses all four loaded rule families to decide whether file rules are active' {
+        $script:UnzipBody | Should Match 'hasRules\s*:=\s*obj\.rename\.ext\.Count\s*\+\s*obj\.rename\.name\.Count\s*\+\s*obj\.rename\.exp\.Count\s*\+\s*obj\.deleteExp\.Length\s*>\s*0'
+        $script:UnzipBody | Should Match 'isDir\s*&&\s*folderEmpty'
+    }
+
+    It 'queries the cached rule state once and enumerates only directories when no rules exist' {
+        $script:UnzipBody | Should Match 'hasAfterUnzipRules\s*:=\s*AfterUnzip\("",\s*true\)'
+        $script:UnzipBody | Should Match '(?s)if\s*\(\s*hasAfterUnzipRules\s*\)\s*\{\s*loop files tmpDir "\\\*\.\*",\s*"RDF"\s*AfterUnzip\(A_LoopFileFullPath\)\s*\}'
+        $script:UnzipBody | Should Match '(?s)\}\s*else\s*\{\s*loop files tmpDir "\\\*\.\*",\s*"DR"\s*AfterUnzip\(A_LoopFileFullPath\)\s*\}'
+        $script:UnzipBody | Should Not Match 'InStr\(A_LoopFileAttrib,\s*"D"\)\s*AfterUnzip'
+        $script:UnzipBody | Should Match 'hasRules\s*:=\s*obj\.rename\.ext\.Count\s*\+\s*obj\.rename\.name\.Count\s*\+\s*obj\.rename\.exp\.Count\s*\+\s*obj\.deleteExp\.Length\s*>\s*0'
+    }
+}

@@ -113,6 +113,44 @@ try {
     FileDelete(emitter)
 }
 
+; A fast bulk writer exposes pipe backpressure without a wall-clock threshold.
+bulkEmitter := A_Temp "\SmartZip-BulkEmitter-" DllCall("GetCurrentProcessId") ".ahk"
+bulkText := "
+(
+#Requires AutoHotkey v2.0
+#SingleInstance Off
+h := DllCall("GetStdHandle", "Int", -11, "Ptr")
+block := Buffer(4096, 65)
+Loop 512 {
+    if !DllCall("WriteFile", "Ptr", h, "Ptr", block.Ptr, "UInt", block.Size, "UInt*", &written := 0, "Ptr", 0)
+        ExitApp(99)
+}
+FileAppend("TAIL", "**", "UTF-8-RAW")
+ExitApp(7)
+)"
+FileAppend(bulkText, bulkEmitter, "UTF-8")
+try {
+    blockText := StrReplace(Format("{:4096}", ""), " ", "A")
+    expectedBulk := ""
+    Loop 512
+        expectedBulk .= blockText
+    host.captureReadCalls := 0
+    bulk := host.RunCmdCapture('"' A_AhkPath '" /ErrorStdOut "' bulkEmitter '"', "UTF-8")
+    AssertTrue(bulk.output == expectedBulk "TAIL", "capture_large_output_complete")
+    AssertEq(bulk.exitCode, 7, "capture_large_exit_7")
+    AssertTrue(host.captureReadCalls <= 128, "capture_large_read_efficiency")
+} finally {
+    FileDelete(bulkEmitter)
+}
+
+retryHost := RetryCaptureHost()
+retryResult := retryHost.RunCmdCapture(cmd5)
+AssertTrue(retryResult.exitCode = 0 && InStr(retryResult.output, "UTF8_OK"), "capture_retries_default_pipe")
+failedHost := FailedCaptureHost()
+failedResult := failedHost.RunCmdCapture(cmd5)
+AssertTrue(failedResult.exitCode = -1 && failedResult.output = "" && !failedResult.cancelled
+    && failedHost.CMDPID = 0, "capture_pipe_failure_returns_error")
+
 summary := "SUMMARY passed=" passCount " failed=" failCount
 lines.Push(summary)
 text := ""

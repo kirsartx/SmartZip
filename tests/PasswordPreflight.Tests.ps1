@@ -39,6 +39,7 @@ function Get-SourceSlice {
 }
 
 function Export-PasswordPreflightFragment {
+    param([string]$DestinationPath)
     $src = Get-SmartZipSourceText
     $startMarker = "`n    ProbeArchive("
     $endMarker = "`n    RunCmdCapture("
@@ -489,16 +490,21 @@ PasswordPreflight_RememberPassword(this, password) {
 }
 
 "@
-    Set-Content -LiteralPath $script:FragmentPath -Value $fragment -Encoding UTF8
+    Set-Content -LiteralPath $DestinationPath -Value $fragment -Encoding UTF8
 }
 
 function Invoke-PasswordPreflightHarness {
-    Export-PasswordPreflightFragment
-    $outFile = Join-Path $env:TEMP ("PasswordPreflight.Harness.{0}.out.txt" -f ([guid]::NewGuid().ToString('N')))
-    $args = @('/ErrorStdOut', $script:HarnessPath, $outFile)
-    $p = Start-Process -FilePath $script:AhkExe -ArgumentList $args -Wait -PassThru -NoNewWindow `
-        -RedirectStandardOutput (Join-Path $env:TEMP 'PasswordPreflight.Harness.stdout.txt') `
-        -RedirectStandardError (Join-Path $env:TEMP 'PasswordPreflight.Harness.stderr.txt')
+    $stage = New-AhkTestStage -Name 'Password'
+    try {
+    $tests = Join-Path $stage 'tests'
+    New-Item -ItemType Directory -Path $tests | Out-Null
+    Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'lib') -Destination (Join-Path $stage 'lib') -Recurse
+    $harness = Join-Path $tests 'PasswordPreflight.Harness.ahk'
+    Copy-Item -LiteralPath $script:HarnessPath -Destination $harness
+    Export-PasswordPreflightFragment -DestinationPath (Join-Path $tests 'PasswordPreflight.Fragment.ahk')
+    $outFile = Join-Path $stage 'results.txt'
+    $code = Invoke-AhkResultRunner -ScriptPath $harness -ScriptArguments @($outFile) -ResultPath $outFile `
+        -StandardOutputPath (Join-Path $stage 'stdout.txt') -StandardErrorPath (Join-Path $stage 'stderr.txt')
     $map = @{}
     if (Test-Path -LiteralPath $outFile) {
         Get-Content -LiteralPath $outFile -Encoding UTF8 | ForEach-Object {
@@ -511,17 +517,23 @@ function Invoke-PasswordPreflightHarness {
             }
         }
     }
-    return [pscustomobject]@{ ExitCode = $p.ExitCode; Map = $map; OutFile = $outFile }
+    return [pscustomobject]@{ ExitCode = $code; Map = $map }
+    } finally { Remove-AhkTestStage $stage }
 }
 
 Describe 'PasswordPreflightBehavior' {
     BeforeAll {
+        $script:PwFragmentBefore = if (Test-Path $script:FragmentPath) { (Get-FileHash $script:FragmentPath).Hash } else { '' }
         $script:PwRun = Invoke-PasswordPreflightHarness
         $script:PwMap = $script:PwRun.Map
     }
 
     It 'harness exits 0' {
         $script:PwRun.ExitCode | Should Be 0
+    }
+    It 'does not create or overwrite a repository fragment' {
+        $after = if (Test-Path $script:FragmentPath) { (Get-FileHash $script:FragmentPath).Hash } else { '' }
+        $after | Should Be $script:PwFragmentBefore
     }
 
     $cases = @(

@@ -32,12 +32,12 @@ function Invoke-ArchiveHarness {
     if (-not (Test-Path -LiteralPath $script:HarnessPath)) {
         throw "Harness not found: $($script:HarnessPath)"
     }
-    $outFile = Join-Path $env:TEMP ("ArchiveDiagnostics.Harness.{0}.{1}.out.txt" -f $Mode, [guid]::NewGuid().ToString('N'))
-    $errFile = Join-Path $env:TEMP ("ArchiveDiagnostics.Harness.{0}.{1}.err.txt" -f $Mode, [guid]::NewGuid().ToString('N'))
-    $args = @('/ErrorStdOut', $script:HarnessPath, $outFile, $Mode)
-    $p = Start-Process -FilePath $script:AhkExe -ArgumentList $args -Wait -PassThru -NoNewWindow `
-        -RedirectStandardOutput (Join-Path $env:TEMP 'ArchiveDiagnostics.Harness.stdout.txt') `
-        -RedirectStandardError $errFile
+    $stage = New-AhkTestStage -Name 'Diagnostics'
+    try {
+    $outFile = Join-Path $stage 'results.txt'
+    $errFile = Join-Path $stage 'stderr.txt'
+    $code = Invoke-AhkResultRunner -ScriptPath $script:HarnessPath -ScriptArguments @($outFile, $Mode) -ResultPath $outFile `
+        -StandardOutputPath (Join-Path $stage 'stdout.txt') -StandardErrorPath $errFile
     $map = @{}
     if (Test-Path -LiteralPath $outFile) {
         Get-Content -LiteralPath $outFile -Encoding UTF8 | ForEach-Object {
@@ -52,11 +52,12 @@ function Invoke-ArchiveHarness {
         }
     }
     return [pscustomobject]@{
-        ExitCode = $p.ExitCode
+        ExitCode = $code
         Map      = $map
         OutFile  = $outFile
         ErrFile  = $errFile
     }
+    } finally { Remove-AhkTestStage $stage }
 }
 
 # Invoke Classify7zResult once and return status|passwordUsed|errorLineCount for ZS regressions.
@@ -71,10 +72,10 @@ function Invoke-Classify7zProbe {
     if (-not (Test-Path -LiteralPath $script:AhkExe)) {
         throw "AutoHotkey not found: $($script:AhkExe)"
     }
-    $id = [guid]::NewGuid().ToString('N')
-    $outFile = Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.out.txt" -f $id)
-    $errFile = Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.err.txt" -f $id)
-    $scriptFile = Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.ahk" -f $id)
+    $stageRoot = New-AhkTestStage -Name 'Classify'
+    $outFile = Join-Path $stageRoot 'results.txt'
+    $errFile = Join-Path $stageRoot 'stderr.txt'
+    $scriptFile = Join-Path $stageRoot 'probe.ahk'
     $libEsc = $script:LibPath -replace '\\', '\\'
     $outEsc = $outFile -replace '\\', '\\'
     $archEsc = $ArchivePath -replace '\\', '\\'
@@ -90,33 +91,97 @@ FileEncoding "UTF-8"
 #Include $libEsc
 outputText := $outputExpr
 r := Classify7zResult("$stageEsc", $ExitCode, outputText, "$archEsc")
-payload := r.status . "|" . r.passwordUsed . "|" . r.errorLines.Length
+payload := r.status . "|" . r.passwordUsed . "|" . r.errorLines.Length . "|" . r.missingVolumes.Length
 FileAppend payload, "$outEsc", "UTF-8"
 "@
     try {
         Set-Content -LiteralPath $scriptFile -Value $ahk -Encoding UTF8
-        $p = Start-Process -FilePath $script:AhkExe -ArgumentList @('/ErrorStdOut', $scriptFile) `
-            -Wait -PassThru -NoNewWindow `
-            -RedirectStandardOutput (Join-Path $env:TEMP ("ArchiveDiagnostics.ClassifyProbe.{0}.stdout.txt" -f $id)) `
-            -RedirectStandardError $errFile
-        if ($p.ExitCode -ne 0) {
-            $errText = if (Test-Path -LiteralPath $errFile) { Get-Content -LiteralPath $errFile -Raw } else { '' }
-            throw "Classify probe AHK exit=$($p.ExitCode) err=$errText"
-        }
-        if (-not (Test-Path -LiteralPath $outFile)) {
-            throw "Classify probe produced no output file"
-        }
+        Invoke-AhkResultRunner -ScriptPath $scriptFile -ResultPath $outFile `
+            -StandardOutputPath (Join-Path $stageRoot 'stdout.txt') -StandardErrorPath $errFile | Out-Null
         $raw = (Get-Content -LiteralPath $outFile -Encoding UTF8 -Raw).Trim()
-        $parts = $raw -split '\|', 3
+        $parts = $raw -split '\|', 4
         return [pscustomobject]@{
             Status         = $parts[0]
             PasswordUsed   = if ($parts.Count -gt 1) { $parts[1] } else { '' }
             ErrorLineCount = if ($parts.Count -gt 2) { [int]$parts[2] } else { 0 }
+            MissingVolumeCount = if ($parts.Count -gt 3) { [int]$parts[3] } else { 0 }
             Raw            = $raw
         }
     }
     finally {
-        Remove-Item -LiteralPath $scriptFile, $outFile, $errFile -Force -ErrorAction SilentlyContinue
+        Remove-AhkTestStage $stageRoot
+    }
+}
+
+Describe 'ListingMetadataClassification' {
+    It 'preserves ERROR property missing-volume evidence and priority over encryption' {
+        $r = Invoke-Classify7zProbe -Output "Type = Rar5`nERROR = Missing volume : sample.part02.rar`nEncrypted = +`n" -ExitCode 2
+        $r.Status | Should Be 'MISSING_VOLUME'
+        $r.ErrorLineCount | Should Be 1
+        $r.MissingVolumeCount | Should Be 1
+    }
+    It 'preserves ERROR property corruption evidence' {
+        $r = Invoke-Classify7zProbe -Output "Type = 7z`nERROR = Headers Error`n" -ExitCode 2
+        $r.Status | Should Be 'HEADER_CORRUPT'
+        $r.ErrorLineCount | Should Be 1
+    }
+    It 'preserves WARNING property evidence' {
+        $r = Invoke-Classify7zProbe -Output "Type = 7z`nWARNING = There are data after the end of archive`n" -ExitCode 1
+        $r.Status | Should Be 'OK_WITH_WARNING'
+    }
+    foreach ($action in @('Listing','Testing','Extracting')) {
+        It "ignores the archive path echoed by $action" {
+            $r = Invoke-Classify7zProbe -Output ($action + " archive: C:\tmp\Headers Error.7z`nEverything is Ok`n") -Stage 'test' -ExitCode 0
+            $r.Status | Should Be 'OK'
+            $r.ErrorLineCount | Should Be 0
+        }
+    }
+    foreach ($phrase in @('Wrong password','Headers Error','Data Error','There are data after the end of archive','Missing volume','Is not archive')) {
+        It "keeps Path value '$phrase' out of diagnostic matching" {
+            $r = Invoke-Classify7zProbe -Output ("Type = 7z`nPath = " + $phrase + ".txt`nEncrypted = -`n") -ExitCode 0
+            $r.Status | Should Be 'OK'
+            $r.ErrorLineCount | Should Be 0
+        }
+    }
+    foreach ($field in @('Comment','Symbolic Link','Method')) {
+        It "keeps $field values out of diagnostic matching" {
+            $r = Invoke-Classify7zProbe -Output ("Type = 7z`n" + $field + " = Data Error`n") -ExitCode 0
+            $r.Status | Should Be 'OK'
+            $r.ErrorLineCount | Should Be 0
+        }
+    }
+    It 'retains probe encryption evidence in a metadata record' {
+        $r = Invoke-Classify7zProbe -Output "Type = zip`nPath = Headers Error.txt`nEncrypted = +`n" -ExitCode 0
+        $r.Status | Should Be 'NEED_PASSWORD'
+    }
+    It 'retains genuine errors printed after metadata records' {
+        $r = Invoke-Classify7zProbe -Output "Type = 7z`nPath = normal.txt`nERROR: Data Error : normal.txt`n" -ExitCode 2
+        $r.Status | Should Be 'DATA_CORRUPT'
+        $r.ErrorLineCount | Should Be 1
+    }
+    It 'accepts real clean list and test output when archive and entry names contain error phrases' {
+        $root = Join-Path $env:TEMP ('SmartZip-Metadata-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root | Out-Null
+        try {
+            $file = Join-Path $root 'Data Error.txt'
+            [IO.File]::WriteAllText($file, 'harmless fixture')
+            $archive = Join-Path $root 'Headers Error.7z'
+            $engine = 'C:\Tool\7-Zip-Zstandard\7z.exe'
+            & $engine a -t7z -mx=0 $archive $file -bso0 -bse1 -bsp0
+            $LASTEXITCODE | Should Be 0
+            foreach ($stage in @('probe','test','verify','extract')) {
+                $verb = if ($stage -eq 'probe') { 'l' } else { 't' }
+                $args7z = @($verb,'-bso1','-bse1','-bsp0','-sccUTF-8','-p""',$archive)
+                if ($verb -eq 'l') { $args7z += '-slt' }
+                $listing = & $engine @args7z
+                $LASTEXITCODE | Should Be 0
+                $r = Invoke-Classify7zProbe -Output ($listing -join "`n") -Stage $stage -ExitCode 0
+                $r.Status | Should Be 'OK'
+                $r.ErrorLineCount | Should Be 0
+            }
+        } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 

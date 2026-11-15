@@ -329,60 +329,71 @@ class SmartZip
             if (zipResult.outputState != "usable")
                 continue
 
-            loop files tmpDir "\*.*", "RDF"
-                AfterUnzip(A_LoopFileFullPath)
+            postprocessStarted := A_TickCount
+            try {
+                hasAfterUnzipRules := AfterUnzip("", true)
+                if (hasAfterUnzipRules) {
+                    loop files tmpDir "\*.*", "RDF"
+                        AfterUnzip(A_LoopFileFullPath)
+                } else {
+                    loop files tmpDir "\*.*", "DR"
+                        AfterUnzip(A_LoopFileFullPath)
+                }
 
-            loop files tmpDir "\*.*", "DF"
-            {
-                count := A_Index, souceFile := A_LoopFileFullPath
-                if A_Index > 2
-                    break
-            }
-
-            ;解压后没有文件
-            if !IsSet(count)
-            {
-                this.RecycleItem(tmpDir, A_LineNumber, true)
-                continue
-            }
-
-            notDir := 0
-            loop files tmpDir "\*.*", "FR"
-            {
-                if !DirExist(A_LoopFileFullPath)
-                    notDir++ , souceFile2 := A_LoopFileFullPath
-                if notDir = 2
-                    break
-            }
-
-            if count = 1 || notDir = 1	;只有一个文件或文件夹
-            {
-                if notDir = count	;单个文件夹包含单个文件
-                    souceFile := souceFile2
-
-                isDir := DirExist(souceFile)
-                SplitPath(souceFile, &name, , &ext)
-
-                outFile := this.MoveItem(souceFile, A_WorkingDir "\" name, isDir, A_LineNumber)
-
-                this.RecycleItem(tmpDir, A_LineNumber, true)
-
-                if !isDir
+                loop files tmpDir "\*.*", "DF"
                 {
-                    if this.nesting
-                        UnZipNesting(outFile, ext)
-                } else if this.nestingMuilt
-                    loop files outFile "\*.*", "F"
-                        UnZipNesting(A_LoopFileFullPath, A_LoopFileExt)
+                    count := A_Index, souceFile := A_LoopFileFullPath
+                    if A_Index > 2
+                        break
+                }
 
-            } else	;多个文件
-            {
-                SplitPath(i, , , , &nameNoEXT)
-                outFile := this.MoveItem(tmpDir, A_WorkingDir "\" nameNoEXT, 1, A_LineNumber)
+                ;解压后没有文件
+                if !IsSet(count)
+                {
+                    this.RecycleItem(tmpDir, A_LineNumber, true)
+                    continue
+                }
 
-                if this.nestingMuilt
-                    loop files outFile "\*.*", "F"
-                        UnZipNesting(A_LoopFileFullPath, A_LoopFileExt)
+                notDir := 0
+                loop files tmpDir "\*.*", "FR"
+                {
+                    if !DirExist(A_LoopFileFullPath)
+                        notDir++ , souceFile2 := A_LoopFileFullPath
+                    if notDir = 2
+                        break
+                }
+
+                if count = 1 || notDir = 1	;只有一个文件或文件夹
+                {
+                    if notDir = count	;单个文件夹包含单个文件
+                        souceFile := souceFile2
+
+                    isDir := DirExist(souceFile)
+                    SplitPath(souceFile, &name, , &ext)
+
+                    outFile := this.MoveItem(souceFile, A_WorkingDir "\" name, isDir, A_LineNumber)
+
+                    this.RecycleItem(tmpDir, A_LineNumber, true)
+
+                    if !isDir
+                    {
+                        if this.nesting
+                            UnZipNesting(outFile, ext)
+                    } else if this.nestingMuilt
+                        loop files outFile "\*.*", "F"
+                            UnZipNesting(A_LoopFileFullPath, A_LoopFileExt)
+
+                } else	;多个文件
+                {
+                    SplitPath(i, , , , &nameNoEXT)
+                    outFile := this.MoveItem(tmpDir, A_WorkingDir "\" nameNoEXT, 1, A_LineNumber)
+
+                    if this.nestingMuilt
+                        loop files outFile "\*.*", "F"
+                            UnZipNesting(A_LoopFileFullPath, A_LoopFileExt)
+                }
+            } finally {
+                WriteOperationTiming(this, "postprocess", postprocessStarted)
             }
         }
 
@@ -642,9 +653,9 @@ class SmartZip
         }
 
         ; 解压后处理
-        AfterUnzip(path)
+        AfterUnzip(path, queryRules := false)
         {
-            static isRead := false, obj := { rename: { ext: Map(), name: Map(), exp: Map() },
+            static isRead := false, hasRules := false, obj := { rename: { ext: Map(), name: Map(), exp: Map() },
                 deleteExp: [] }
 
             if !isRead
@@ -654,8 +665,12 @@ class SmartZip
                 ini.ReadLoop("renameExp", obj.rename.exp, , true)
                 ini.ReadLoop("deleteExp", obj.deleteExp)
 
+                hasRules := obj.rename.ext.Count + obj.rename.name.Count + obj.rename.exp.Count + obj.deleteExp.Length > 0
                 isRead := true
             }
+
+            if queryRules
+                return hasRules
 
             isDir := DirExist(path)
             folderEmpty := true
@@ -1344,8 +1359,12 @@ class SmartZip
         cmd := this.7z ' l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' commandPath '"'
         if this.cmdLog
             this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
+        probeListCaptureStarted := A_TickCount
         cap := this.RunCmdCapture(cmd, "UTF-8")
+        WriteOperationTiming(this, "probe_list_capture", probeListCaptureStarted)
+        probeListClassifyStarted := A_TickCount
         result := Classify7zResult("probe", cap.exitCode, cap.output, archivePath)
+        WriteOperationTiming(this, "probe_list_classify", probeListClassifyStarted)
 
         ; Some damaged/partial 7z packages report "not archive" on list, but still yield a more
         ; specific diagnosis on test (header corrupt / truncated / password). Prefer that signal
@@ -1356,8 +1375,10 @@ class SmartZip
                 tcmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' commandPath '"'
                 if this.cmdLog
                     this.testLog .= '`n#####`n' RedactDiagnostic(tcmd) '`n'
+                probeFallbackTestStarted := A_TickCount
                 tcap := this.RunCmdCapture(tcmd, "UTF-8")
                 tretry := Classify7zResult("probe", tcap.exitCode, tcap.output, archivePath)
+                WriteOperationTiming(this, "probe_fallback_test", probeFallbackTestStarted)
                 if (tretry.status = ArchiveStatus.HEADER_CORRUPT
                     || tretry.status = ArchiveStatus.TRUNCATED
                     || tretry.status = ArchiveStatus.DATA_CORRUPT
@@ -1637,8 +1658,10 @@ class SmartZip
         catch
             hideBool := false
 
+        extractProcessStarted := A_TickCount
         this.Run7z(hideBool, 'x', commandPath, '" -aou -o' tempDir pass this.excludeArgs this.codePage,
             hideBool || this.guiShow, true, A_LineNumber)
+        WriteOperationTiming(this, "7z_extract", extractProcessStarted)
         extractExit := this.exitCode
 
         result := ""
@@ -1649,7 +1672,9 @@ class SmartZip
             ; and text, and can only lower the verdict or explain a hard error: its "Everything
             ; is Ok" never certifies what the extract process wrote.
             cmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"' password '" "' commandPath '"'
+            sourceTestStarted := A_TickCount
             cap := this.RunCmdCapture(cmd, "UTF-8")
+            WriteOperationTiming(this, "source_test", sourceTestStarted)
             if this.cmdLog
                 this.testLog .= '`n#####`n' RedactDiagnostic(cmd) '`n'
             verify := Classify7zResult("verify", cap.exitCode, cap.output, archivePath)
@@ -1663,7 +1688,9 @@ class SmartZip
             ; that the ambiguous code came from the GUI front-end rather than the console.
             usedGui := !hideBool
             if (extractExit != 0 && this.excludeArgs = "" && this.codePage = "") {
+                outputVerifyStarted := A_TickCount
                 check := VerifyExtractedOutput(this, commandPath, tempDir, password)
+                WriteOperationTiming(this, "output_verify", outputVerifyStarted)
                 outputVerified := check.verified
             }
 
@@ -2210,8 +2237,12 @@ class SmartZip
         exitCode := -1
         sOutput := ""
 
-        DllCall("CreatePipe", "PtrP", &hPipeR := 0, "PtrP", &hPipeW := 0, "Ptr", 0, "Int", 0)
-        , DllCall("SetHandleInformation", "Ptr", hPipeW, "Int", 1, "Int", 1)
+        ; Let verbose listings queue larger bursts instead of repeatedly blocking
+        ; the child on a small pipe. Retry the system default if allocation fails.
+        if (!DllCall("CreatePipe", "PtrP", &hPipeR := 0, "PtrP", &hPipeW := 0, "Ptr", 0, "UInt", 1024 * 1024)
+            && !DllCall("CreatePipe", "PtrP", &hPipeR, "PtrP", &hPipeW, "Ptr", 0, "UInt", 0))
+            return { exitCode: -1, output: "", cancelled: false }
+        DllCall("SetHandleInformation", "Ptr", hPipeW, "Int", 1, "Int", 1)
         , DllCall("SetNamedPipeHandleState", "Ptr", hPipeR, "UIntP", &PIPE_NOWAIT := 1, "Ptr", 0, "Ptr", 0)
 
         , P8 := (A_PtrSize = 8)

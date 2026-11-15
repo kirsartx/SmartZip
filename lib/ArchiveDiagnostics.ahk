@@ -69,8 +69,24 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
         if (trimmed = "")
             continue
 
+        ; These announcements echo a path, not a diagnostic verdict.
+        if RegExMatch(trimmed, "i)^(Listing|Testing|Extracting) archive: ")
+            continue
+
         if RegExMatch(trimmed, "i)^Type\s*=\s*(.+)$", &typeMatch)
             result.archiveType := Trim(typeMatch[1])
+
+        ; Technical records are data, including archive/entry names and comments.
+        ; Match diagnostics on messages, not phrases embedded in field values.
+        ; ERROR/WARNING properties are real diagnostics in 7-Zip's listing format.
+        if (RegExMatch(trimmed, "^([A-Za-z][A-Za-z0-9 ]*) = ", &fieldMatch)
+            && !(Trim(fieldMatch[1]) ~= "i)^(Errors?(?: Type)?|Warnings?)$")) {
+            if (stage = "probe" && trimmed ~= "i)^Encrypted\s*=\s*\+") {
+                hasNeedPassword := true
+                result.encryptionEvidence := true
+            }
+            continue
+        }
 
         isWarn := false
         isErr := false
@@ -93,7 +109,7 @@ Classify7zResult(stage, exitCode, output, archivePath := "") {
             hasNeedPassword := true
             isErr := true
         }
-        ; Content-encrypted readable header: probe list shows item Encrypted = + (exit often 0)
+        ; Keep accepting compact metadata from callers as well as standard -slt records.
         if (stage = "probe" && trimmed ~= "i)^Encrypted\s*=\s*\+") {
             hasNeedPassword := true
             result.encryptionEvidence := true

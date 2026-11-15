@@ -39,6 +39,7 @@ function Get-SourceSlice {
 }
 
 function Export-RunCmdCaptureFragment {
+    param([string]$DestinationPath)
     $src = Get-SmartZipSourceText
     $body = Get-SourceSlice -Source $src -StartMarker "`n    RunCmdCapture(" -EndMarker "`n    RunCmd(CmdLine"
     if ([string]::IsNullOrEmpty($body)) {
@@ -47,26 +48,43 @@ function Export-RunCmdCaptureFragment {
     # Build a host class wrapping the extracted method body.
     # Strip the leading newline and re-indent into class RunCmdCaptureHost.
     $method = $body.TrimStart("`r", "`n")
+    $method = $method.Replace('capturedSize += received', "this.captureReadCalls += 1`r`n                    capturedSize += received")
+    $pipePattern = 'DllCall\("CreatePipe",[^\r\n]*?\)'
+    $retryMethod = ([regex]::new($pipePattern)).Replace($method, '(hPipeR := 0, hPipeW := 0, 0)', 1)
+    $failedMethod = [regex]::Replace($method, $pipePattern, '(hPipeR := 0, hPipeW := 0, 0)')
     # The product method is indented with 4 spaces as a class method; keep as-is inside host class.
     $fragment = @"
 #Requires AutoHotkey v2.0
 
 class RunCmdCaptureHost {
     CMDPID := 0
+    captureReadCalls := 0
 
 $method
 }
+class RetryCaptureHost {
+    CMDPID := 0
+    captureReadCalls := 0
+$retryMethod
+}
+class FailedCaptureHost {
+    CMDPID := 0
+    captureReadCalls := 0
+$failedMethod
+}
 "@
-    Set-Content -LiteralPath $script:FragmentPath -Value $fragment -Encoding UTF8
+    Set-Content -LiteralPath $DestinationPath -Value $fragment -Encoding UTF8
 }
 
 function Invoke-RunCmdCaptureHarness {
-    Export-RunCmdCaptureFragment
-    $outFile = Join-Path $env:TEMP ("RunCmdCapture.Harness.{0}.out.txt" -f ([guid]::NewGuid().ToString('N')))
-    $args = @('/ErrorStdOut', $script:HarnessPath, $outFile)
-    $p = Start-Process -FilePath $script:AhkExe -ArgumentList $args -Wait -PassThru -NoNewWindow `
-        -RedirectStandardOutput (Join-Path $env:TEMP 'RunCmdCapture.Harness.stdout.txt') `
-        -RedirectStandardError (Join-Path $env:TEMP 'RunCmdCapture.Harness.stderr.txt')
+    $stage = New-AhkTestStage -Name 'Capture'
+    try {
+    $harness = Join-Path $stage 'RunCmdCapture.Harness.ahk'
+    Copy-Item -LiteralPath $script:HarnessPath -Destination $harness
+    Export-RunCmdCaptureFragment -DestinationPath (Join-Path $stage 'RunCmdCapture.Fragment.ahk')
+    $outFile = Join-Path $stage 'results.txt'
+    $code = Invoke-AhkResultRunner -ScriptPath $harness -ScriptArguments @($outFile) -ResultPath $outFile `
+        -StandardOutputPath (Join-Path $stage 'stdout.txt') -StandardErrorPath (Join-Path $stage 'stderr.txt')
     $map = @{}
     if (Test-Path -LiteralPath $outFile) {
         Get-Content -LiteralPath $outFile -Encoding UTF8 | ForEach-Object {
@@ -79,17 +97,23 @@ function Invoke-RunCmdCaptureHarness {
             }
         }
     }
-    return [pscustomobject]@{ ExitCode = $p.ExitCode; Map = $map; OutFile = $outFile }
+    return [pscustomobject]@{ ExitCode = $code; Map = $map }
+    } finally { Remove-AhkTestStage $stage }
 }
 
 Describe 'RunCmdCaptureBehavior' {
     BeforeAll {
+        $script:CapFragmentBefore = if (Test-Path $script:FragmentPath) { (Get-FileHash $script:FragmentPath).Hash } else { '' }
         $script:CapRun = Invoke-RunCmdCaptureHarness
         $script:CapMap = $script:CapRun.Map
     }
 
     It 'harness exits 0' {
         $script:CapRun.ExitCode | Should Be 0
+    }
+    It 'does not create or overwrite a repository fragment' {
+        $after = if (Test-Path $script:FragmentPath) { (Get-FileHash $script:FragmentPath).Hash } else { '' }
+        $after | Should Be $script:CapFragmentBefore
     }
 
     $cases = @(
@@ -108,6 +132,11 @@ Describe 'RunCmdCaptureBehavior' {
         'capture_default_cp_output',
         'capture_clears_cmdpid'
         'capture_preserves_split_utf8'
+        'capture_large_output_complete'
+        'capture_large_exit_7'
+        'capture_large_read_efficiency'
+        'capture_retries_default_pipe'
+        'capture_pipe_failure_returns_error'
     )
 
     foreach ($name in $cases) {

@@ -19,10 +19,11 @@ Integration / smoke never read or write `C:\Tool\SmartZip`. Every archive, INI, 
 
 ```powershell
 $expected = [ordered]@{
-  'SmartZip.Static.Tests.ps1'=184
-  'ArchiveDiagnostics.Tests.ps1'=193
-  'RunCmdCapture.Tests.ps1'=16
-  'PasswordPreflight.Tests.ps1'=98
+  'TestInfrastructure.Tests.ps1'=9
+  'SmartZip.Static.Tests.ps1'=192
+  'ArchiveDiagnostics.Tests.ps1'=211
+  'RunCmdCapture.Tests.ps1'=22
+  'PasswordPreflight.Tests.ps1'=99
   'ExtractionLifecycle.Tests.ps1'=39
   'NestingMigration.Tests.ps1'=30
   'DiagnosticUI.Tests.ps1'=53
@@ -39,19 +40,21 @@ if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 & 'C:\Tool\7-Zip-Zstandard\7z.exe' i | Select-Object -First 5
 ```
 
-Expected exact totals: static `184/184`, diagnostics `193/193`, capture `16/16`, password/workflow `98/98`, lifecycle `39/39`, nesting `30/30`, UI `53/53`, real integration `36/36`; overall `649/649`.
+Expected exact totals: infrastructure `9/9`, static `192/192`, diagnostics `211/211`, capture `22/22`, password/workflow `99/99`, lifecycle `39/39`, nesting `30/30`, UI `53/53`, real integration `36/36`; overall `691/691`.
 
-The final review adds two executable warning-token assertions and fifteen executable password-recovery contract assertions. The focused six-suite run is `596/596`; capture and real integration retain their unchanged expected counts for the next whole-branch gate.
+The focused six suites (static, diagnostics, password, lifecycle, nesting and UI)
+sum to `624/624`; the complete core gate above also includes infrastructure,
+capture and real integration.
 
 ## Real-7-Zip integration suite
 
 ### Directory-scan optimization regression
 
 Run `Invoke-Pester -Script '.\tests\DirectoryScanOptimization.Tests.ps1' -PassThru`
-in addition to the eight-suite gate. Expected: 1 passed, 0 failed. This runs 120
+in addition to the nine-suite gate. Expected: 1 passed, 0 failed. This runs 120
 volume-detection comparisons against commit `de80a38` (requires local Git history),
 including plain files, numeric evidence, missing volumes, old RAR and case variants.
-The eight-suite total is 649; with this regression the total is 650.
+The nine-suite total is 691; with this regression the total is 692.
 
 ### SFXV self-extracting split regression
 
@@ -63,7 +66,7 @@ Invoke-Pester -Script './tests/Sfxv.Integration.Tests.ps1' -PassThru
 Invoke-Pester -Script './tests/Sfxv.ResultContract.Tests.ps1' -PassThru
 ```
 
-Expected: `Sfxv.Tests.ps1` 1/1, `Sfxv.Integration.Tests.ps1` 137/137 and
+Expected: `Sfxv.Tests.ps1` 1/1, `Sfxv.Integration.Tests.ps1` 141/141 and
 `Sfxv.ResultContract.Tests.ps1` 10/10.
 The integration suite creates data-only MZ/SFXV fixtures, strips the self-extractor
 stub into a temporary regular 7z stream, and verifies plain, encrypted, warning,
@@ -75,13 +78,35 @@ resolver with real 7-Zip; UI/finalization are replaced by pass-through seams.
 It checks one merged path across password retries, cancel/exception cleanup,
 nested ownership restoration, locked input, unavailable space (overridden space
 query), and short writes (source-extracted merge with a short-writing file wrapper).
-Preparation timing is logged separately as `prepare`. The full total is 805.
+Preparation timing is logged separately as `prepare`. The full 14-suite total is 851. When
+`timingLog=1`, aggregate labels remain and finer fixed labels identify the 7-Zip
+extract process, follow-up source test, ambiguous-output integrity check (only when
+run), usable-output post-processing, initial probe list capture/classification, and
+conditional known-extension fallback test. These lines contain only a fixed operation
+label and integer milliseconds; timing remains off by default.
 
 `RunCmdCapture` collects raw pipe bytes and decodes once after exit and draining, so
 UTF-8 characters split across writes cannot corrupt archive entry names. The capture
-suite emits each byte of a Chinese character separately with a delay. CRC reads explicitly
+suite emits each byte of a Chinese character separately with a delay. A 1 MiB pipe
+reduces backpressure on verbose listings, with a system-default retry if creation
+fails. Bulk-output tests check exact stdout/stderr, exit status and bounded read
+counts; injected failures exercise fallback and total allocation failure.
+CRC reads explicitly
 seek to byte zero after FileOpen's BOM detection; real UTF-8/UTF-16 BOM fixtures prove
 that the BOM is part of the checksum, not skipped as text encoding metadata.
+
+### Metadata and harness regressions
+
+Technical `Key = Value` records and archive-path announcements are data rather than
+diagnostics. Filename phrases such as `Data Error.txt` must not mark a clean archive
+as corrupt. Real `7z l` and `7z t` fixtures cover this; genuine diagnostics and probe
+`Encrypted = +` evidence remain recognized.
+
+Capture/preflight fragments are generated only in unique `%TEMP%\SmartZip-Test-*-<guid>`
+stages. The bounded helper checks process exit and fresh result presence independently.
+`TestInfrastructure.Tests.ps1` covers nonzero exits with existing output, missing/stale
+results, timeouts, space-containing arguments, stream capture and constrained cleanup.
+Repository fragments are left unchanged, including pre-existing untracked files.
 
 ### Extraction verdict and output integrity
 

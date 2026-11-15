@@ -97,13 +97,13 @@ Add regression tests before implementation, proving:
 - 每一类规则单独存在时都会禁用快速路径，并继续按原有行为作用于匹配的文件和目录：扩展名重命名、名称重命名、正则重命名、正则删除。
 - 嵌套解压以及现有处理顺序和行为均保持不变。
 
-Then run the documented full serial test gate (currently 813 assertions),
+Then run the documented full serial test gate (currently 815 assertions),
 production smoke, and the same three-run count-stress benchmark. Compare exact
 output tree contents and counts as well as post-process timing. A speedup is not
 accepted if output behavior differs. Report timing distributions, not only the
 best run. No production installation or publication is included in this scope.
 
-随后运行文档规定的完整串行测试门禁（当前共 813 项断言）、生产版本冒烟测试，以及相同的三次文件数量压力基准。比较精确的输出目录内容、文件/目录数量和后处理耗时。若输出行为有任何差异，即使速度提升也不算通过。报告耗时分布，而非只报告最快一次。本范围不包含安装生产版本或发布。
+随后运行文档规定的完整串行测试门禁（当前共 815 项断言）、生产版本冒烟测试，以及相同的三次文件数量压力基准。比较精确的输出目录内容、文件/目录数量和后处理耗时。若输出行为有任何差异，即使速度提升也不算通过。报告耗时分布，而非只报告最快一次。本范围不包含安装生产版本或发布。
 
 ## Risks and boundaries / 风险与边界
 
