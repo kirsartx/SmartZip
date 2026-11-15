@@ -1,5 +1,35 @@
 # Active Task
 
+## Release 3.6 Kirs.10 packaged — 2026-11-16
+
+- Version is now `Kirs.10`, `buildVersion` 30, product version `30.0.0.0`, and
+  `buileTime` `2026/11/16 3:33:26`. Kirs.9 and its tag stay unchanged.
+- Hook-free build `%TEMP%\SmartZip-prod-build-20261116-kirs10\SmartZip.exe`,
+  1447936 bytes, SHA-256
+  `25A4C03A5EB2FBC4076CA8657F9ADFC00B23283D9C979CFDC9E6E47DFEE6B4FE`.
+  Smoke passed `valid`, `crcPartial`, `splitMissing`, `encryptedHeader`;
+  leaked processes 0; redaction true. Static tests 192/192.
+- Installed `C:\Tool\SmartZip\SmartZip.exe` is that hash. The previous tonight
+  build `311AE4FE282FD28AA9FAC3D82B58334E40163472AB293DBB5EBAD6C7D653EDAD`
+  is `C:\Tool\SmartZip\SmartZip.exe.bak-pre-kirs10-20261116`. INI remains
+  `DDCC1A739F63700699E040095ECE3CEE39F3B4DCC9C5B18C67EE4824E7EE96A4`.
+
+## Installed executable updated — 2026-11-16
+
+- Hook-free production compile of current `main` (`3165479`) in
+  `%TEMP%\SmartZip-prod-build-20261116-033118`. Ahk2Exe exit 0. Staged source
+  matched the repository, contained one `ArchiveDiagnostics` include, and had no
+  test hook. Compiled `SmartZip.exe` is 1447936 bytes, SHA-256
+  `311AE4FE282FD28AA9FAC3D82B58334E40163472AB293DBB5EBAD6C7D653EDAD`, and the
+  binary contains no `IntegrationTestHook` string.
+- Production smoke of that artifact passed `valid`, `crcPartial`, `splitMissing`,
+  and `encryptedHeader`. `Passed=True`, `LeakedProcessCount=0`, `RedactionOk=True`.
+- Installed `C:\Tool\SmartZip\SmartZip.exe` now has that hash. Previous bytes
+  `6031E2B04C0739F7E7D80113D5DF03508BAB1962D7336B64003DC9C207DB27C5` are at
+  `C:\Tool\SmartZip\SmartZip.exe.bak-source-20261116-033118`. `SmartZip.ini`
+  stayed `DDCC1A739F63700699E040095ECE3CEE39F3B4DCC9C5B18C67EE4824E7EE96A4`.
+  No commit or push was made for this deployment.
+
 ## No-rule post-process walk measured — 2026-11-16
 
 - Usable-output post-processing now uses `loop files "DR"` when `AfterUnzip("", true)`
