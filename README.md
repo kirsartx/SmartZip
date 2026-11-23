@@ -16,6 +16,17 @@
  - 压缩
    - 全是文件夹则每个文件夹生成一个压缩包, 否则生成单个压缩包
 
+### 照片副檔名的壓縮包 / Archives with photo extensions
+
+把副檔名是 `.png`、`.jpg` 或 `.jpeg` 的偽裝壓縮包交給「智能解壓」即可，
+無需改名。啟用巢狀解壓時，SmartZip 也會辨識檔頭為 RAR、7z 或 ZIP 的這類檔案，
+沿用密碼庫與解壓驗證流程。預設會略過正常照片，使用者自己設定的副檔名規則仍適用。
+
+Use Smart Extract on archives named `.png`, `.jpg` or `.jpeg` without renaming them.
+With nested extraction enabled, SmartZip also recognizes these files by their
+RAR, 7z or ZIP signature and uses the existing password library and verification.
+Ordinary photos are skipped by default. Custom extension rules still apply.
+
 ## 3.6 Kirs.10 解压结果与速度
 
 SmartZip **3.6 Kirs.10 (30)** 在 Kirs.9 之后补上分卷自解压、大包警告的结果判断，并减少列表捕获和无规则后处理的开销。它不替代、不修改 Kirs.1–Kirs.9 的既有标签或 Release。

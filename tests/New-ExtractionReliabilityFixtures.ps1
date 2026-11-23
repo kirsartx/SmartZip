@@ -737,6 +737,30 @@ $manifest.fixtures['extensionlessArchive'] = [ordered]@{
     selectedMember = [System.IO.Path]::GetFileName($extlessPath)
 }
 
+# An encrypted archive with a photo suffix alongside an actual PNG.
+$photoDir = Join-Path $workDir 'photo-package'
+New-Item -ItemType Directory -Path $photoDir -Force | Out-Null
+$realPhoto = Join-Path $photoDir 'photo.png'
+[IO.File]::WriteAllBytes($realPhoto, [Convert]::FromBase64String(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY0iZ+vY/AAYtAuY09dZ/AAAAAElFTkSuQmCC'))
+$photoPayload = Join-Path $workDir 'photo-package-payload.txt'
+[IO.File]::WriteAllText($photoPayload, 'SmartZip encrypted photo archive fixture')
+$photoInner = Join-Path $workDir 'photo-inner.7z'
+New-ArchiveFromFiles -ArchivePath $photoInner -Files @($photoPayload) -Type '7z' -ExtraArgs @('-mhe=off', "-p$fixturePassword") | Out-Null
+$disguisedPhoto = Join-Path $photoDir 'disguised.PNG'
+Copy-Item -LiteralPath $photoInner -Destination $disguisedPhoto -Force
+$photoOuter = Join-Path $fxDir 'photo-package.zip'
+New-ArchiveFromFiles -ArchivePath $photoOuter -Files @($disguisedPhoto, $realPhoto) -Type 'zip' | Out-Null
+$manifest.fixtures['photoArchiveNested'] = [ordered]@{
+    key            = 'photoArchiveNested'
+    path           = $photoOuter
+    members        = @([IO.Path]::GetFileName($photoOuter))
+    expectedStatus = 'OK'
+    selectedMember = [IO.Path]::GetFileName($photoOuter)
+    photoSha256    = (Get-FileHash -LiteralPath $realPhoto -Algorithm SHA256).Hash
+    payloadSha256  = (Get-FileHash -LiteralPath $photoPayload -Algorithm SHA256).Hash
+}
+
 $manifestPath = Join-Path $Root 'fixture-manifest.json'
 $json = $manifest | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))

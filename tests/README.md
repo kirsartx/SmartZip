@@ -23,11 +23,11 @@ $expected = [ordered]@{
   'SmartZip.Static.Tests.ps1'=192
   'ArchiveDiagnostics.Tests.ps1'=211
   'RunCmdCapture.Tests.ps1'=22
-  'PasswordPreflight.Tests.ps1'=99
+  'PasswordPreflight.Tests.ps1'=100
   'ExtractionLifecycle.Tests.ps1'=39
-  'NestingMigration.Tests.ps1'=30
+  'NestingMigration.Tests.ps1'=31
   'DiagnosticUI.Tests.ps1'=53
-  'Real7Zip.Integration.Tests.ps1'=36
+  'Real7Zip.Integration.Tests.ps1'=37
 }
 foreach ($item in $expected.GetEnumerator()) {
     $r = Invoke-Pester -Script (Join-Path '.\tests' $item.Key) -PassThru
@@ -40,10 +40,10 @@ if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 & 'C:\Tool\7-Zip-Zstandard\7z.exe' i | Select-Object -First 5
 ```
 
-Expected exact totals: infrastructure `9/9`, static `192/192`, diagnostics `211/211`, capture `22/22`, password/workflow `99/99`, lifecycle `39/39`, nesting `30/30`, UI `53/53`, real integration `36/36`; overall `691/691`.
+Expected exact totals: infrastructure `9/9`, static `192/192`, diagnostics `211/211`, capture `22/22`, password/workflow `100/100`, lifecycle `39/39`, nesting `31/31`, UI `53/53`, real integration `37/37`; overall `694/694`.
 
 The focused six suites (static, diagnostics, password, lifecycle, nesting and UI)
-sum to `624/624`; the complete core gate above also includes infrastructure,
+sum to `626/626`; the complete core gate above also includes infrastructure,
 capture and real integration.
 
 ## Real-7-Zip integration suite
@@ -54,7 +54,7 @@ Run `Invoke-Pester -Script '.\tests\DirectoryScanOptimization.Tests.ps1' -PassTh
 in addition to the nine-suite gate. Expected: 1 passed, 0 failed. This runs 120
 volume-detection comparisons against commit `de80a38` (requires local Git history),
 including plain files, numeric evidence, missing volumes, old RAR and case variants.
-The nine-suite total is 691; with this regression the total is 692.
+The nine-suite total is 694; with this regression the total is 695.
 
 ### SFXV self-extracting split regression
 
@@ -78,7 +78,7 @@ resolver with real 7-Zip; UI/finalization are replaced by pass-through seams.
 It checks one merged path across password retries, cancel/exception cleanup,
 nested ownership restoration, locked input, unavailable space (overridden space
 query), and short writes (source-extracted merge with a short-writing file wrapper).
-Preparation timing is logged separately as `prepare`. The full 14-suite total is 851. When
+Preparation timing is logged separately as `prepare`. The full 14-suite total is 854. When
 `timingLog=1`, aggregate labels remain and finer fixed labels identify the 7-Zip
 extract process, follow-up source test, ambiguous-output integrity check (only when
 run), usable-output post-processing, initial probe list capture/classification, and
@@ -225,7 +225,7 @@ its own search strings stop matching the sources they slice.
 | `New-ExtractionReliabilityFixtures.ps1` | Deterministic fixtures via real `7z.exe`; process-only `SMARTZIP_FIXTURE_PASSWORD` |
 | `Invoke-CompiledSmartZipScenario.ps1` | Isolated TEMP scenario runner (120s cap, owned-PID cleanup) |
 | `IntegrationTestHook.ahk` | Test-only callbacks: result JSON, GUI suppress, password dialog |
-| `Real7Zip.Integration.Tests.ps1` | 36 integration assertions (including output-state fixtures and 2 TEMP-injection contracts) |
+| `Real7Zip.Integration.Tests.ps1` | 37 integration assertions, including output-state fixtures, photo-named nested archives and 2 TEMP-injection contracts |
 | `SfxvResultHelper.ps1` | Test-only `Assert-SfxvResults` / `Get-SfxvResultMap`, shared by the two SFXV suites |
 | `Sfxv.ResultContract.Tests.ps1` | 10 assertions that the result checker itself cannot pass a bad batch |
 | `Invoke-ProductionSmartZipSmoke.ps1` | Hook-free production smoke (valid / crcPartial / splitMissing / encryptedHeader) |
@@ -249,6 +249,7 @@ its own search strings stop matching the sources they slice.
 | `trailingWarning` | `OK_WITH_WARNING` |
 | `fake7z` / `plainNoExtension` | `NOT_ARCHIVE` |
 | `extensionlessArchive` | `OK` after strict probe |
+| `photoArchiveNested` | `OK`; password-protected 7z named PNG is extracted and the genuine PNG is preserved byte for byte |
 | `passwordCancel` | `CANCELLED` |
 
 ### Test-only TEMP injection (no production hook)

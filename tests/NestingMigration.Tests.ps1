@@ -316,6 +316,35 @@ g := DetectVolumeGroup(v1, sibs)
 AssertTrue(g.isVolume, "volume_detect_is_volume")
 AssertTrue(g.selectedIsFirst, "volume_detect_first")
 
+for caseIndex, spec in [
+    ["rar4.JPG", "JPG", [0x52, 0x61, 0x72, 0x21, 0x1A, 7, 0], true],
+    ["rar5.PNG", "PNG", [0x52, 0x61, 0x72, 0x21, 0x1A, 7, 1, 0], true],
+    ["seven.jpeg", "jpeg", [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C], true],
+    ["zip.png", "png", [0x50, 0x4B, 3, 4], true],
+    ["empty-zip.jpg", "jpg", [0x50, 0x4B, 5, 6], true],
+    ["zip64.png", "png", [0x50, 0x4B, 6, 6], true],
+    ["no-span.png", "png", [0x50, 0x4B, 0x30, 0x30, 0x50, 0x4B, 3, 4], true],
+    ["span.png", "png", [0x50, 0x4B, 7, 8, 0x50, 0x4B, 5, 6], true],
+    ["bad-span.png", "png", [0x50, 0x4B, 7, 8, 0, 0, 0, 0], false],
+    ["image.png", "png", [0x89, 0x50, 0x4E, 0x47, 13, 10, 26, 10, 0x50, 0x4B, 3, 4], false],
+    ["image.jpeg", "jpeg", [0xFF, 0xD8, 0xFF, 0xE0], false],
+    ["short.png", "png", [0x52, 0x61, 0x72, 0x21, 0x1A, 7, 1], false],
+    ["unconfigured.bin", "bin", [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C], false]
+] {
+    path := A_ScriptDir "\work\" spec[1]
+    bytes := Buffer(spec[3].Length)
+    for index, byte in spec[3]
+        NumPut("UChar", byte, bytes, index - 1)
+    fixture := FileOpen(path, "w", "UTF-8-RAW")
+    fixture.RawWrite(bytes)
+    fixture.Close()
+    AssertEq(host.IsNestedArchiveCandidate(path, spec[2]), spec[4], "photo_candidate_" caseIndex)
+}
+AssertFalse(host.IsNestedArchiveCandidate(A_ScriptDir "\work\no-file.png", "png"), "photo_candidate_missing")
+host.ext := Map("png", true)
+AssertTrue(host.IsNestedArchiveCandidate(A_ScriptDir "\work\image.png", "png"), "photo_candidate_configured_override")
+host.ext := Map()
+
 migrated := RunMigrateCase(["^\d+$", "zi", "7", "z", "ZI", "custom$"])
 AssertEq(migrated.Length, 3, "migrate_count_three_kept")
 AssertEq(migrated[1], "^\d+$", "migrate_keeps_digit_regex")
@@ -512,6 +541,11 @@ Describe 'NestingMigrationBehavior' {
             $script:ProductRun.Map.ContainsKey($name) | Should Be $true
             $script:OracleRun.Map[$name] | Should Be 'PASS'
             $script:ProductRun.Map[$name] | Should Be 'PASS'
+        }
+    }
+    It 'recognizes photo-named archive signatures without probing real images or unrelated suffixes' {
+        foreach ($label in @((1..13 | ForEach-Object { "photo_candidate_$_" })) + @('photo_candidate_missing', 'photo_candidate_configured_override')) {
+            $script:ProductRun.Map[$label] | Should Be 'PASS'
         }
     }
 }

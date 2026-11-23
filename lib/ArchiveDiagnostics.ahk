@@ -233,6 +233,48 @@ _VolHasPatternDEvidence(stem, selIndex, indices) {
     return false
 }
 
+; A photo suffix is only a candidate when an archive signature starts at byte zero.
+; 7-Zip still verifies the format; the signature alone says nothing about integrity.
+IsPhotoArchiveCandidate(path, ext) {
+    switch StrLower(ext) {
+        case "png", "jpg", "jpeg":
+        default:
+            return false
+    }
+
+    file := ""
+    try {
+        file := FileOpen(path, "r")
+        header := Buffer(8)
+        file.Pos := 0  ; FileOpen may skip a text BOM; signatures must start at zero.
+        count := file.RawRead(header)
+    } catch OSError {
+        return false
+    } finally {
+        if IsObject(file)
+            file.Close()
+    }
+
+    if (count < 4)
+        return false
+    signature := NumGet(header, 0, "UInt")
+    switch signature {
+        case 0x04034B50, 0x06054B50, 0x06064B50:  ; ZIP local file or empty ZIP/ZIP64
+            return true
+        case 0xAFBC7A37:  ; 7z
+            return count >= 6 && NumGet(header, 4, "UShort") = 0x1C27
+        case 0x21726152:  ; RAR4 or RAR5
+            return count >= 7 && NumGet(header, 4, "UShort") = 0x071A
+                && (NumGet(header, 6, "UChar") = 0 || (count >= 8 && NumGet(header, 6, "UShort") = 1))
+    }
+    ; ZIP spanning markers also need a ZIP record immediately behind them.
+    if (count = 8 && (signature = 0x30304B50 || signature = 0x08074B50)) {
+        zipRecord := NumGet(header, 4, "UInt")
+        return zipRecord = 0x04034B50 || zipRecord = 0x06054B50 || zipRecord = 0x06064B50
+    }
+    return false
+}
+
 ; Conservative filename gate for every supported volume pattern. This is only a
 ; candidate check: numeric suffixes still need DetectVolumeGroup's evidence.
 IsVolumeNameCandidate(path) {

@@ -379,6 +379,21 @@ Describe 'Real7Zip Integration' {
         Get-ResultStatus $run | Should Be 'OK'
     }
 
+    It 'extracts an encrypted photo-named nested archive and preserves a genuine PNG' {
+        if (-not (Ensure-Ready)) { return }
+        $run = Get-CachedScenario -Key 'status' -Scenario 'photoArchiveNested' -DelSource 0 -PasswordMode 'correctSaved'
+        Get-ResultStatus $run | Should Be 'OK'
+        $fixture = $script:Manifest.fixtures.photoArchiveNested
+        $outputs = @(Get-ChildItem -LiteralPath $run.TargetDir -Recurse -File)
+        $photo = @($outputs | Where-Object Name -eq 'photo.png')
+        $payload = @($outputs | Where-Object Name -eq 'photo-package-payload.txt')
+        $photo.Count | Should Be 1
+        $payload.Count | Should Be 1
+        (Get-FileHash -LiteralPath $photo[0].FullName).Hash | Should Be $fixture.photoSha256
+        (Get-FileHash -LiteralPath $payload[0].FullName).Hash | Should Be $fixture.payloadSha256
+        Assert-SourcePreserved $run
+    }
+
     It 'passwordCancel with dialogCancel is CANCELLED and source preserved' {
         if (-not (Ensure-Ready)) { return }
         $run = Get-CachedScenario -Key 'status' -Scenario 'passwordCancel' -DelSource 0 -PasswordMode 'dialogCancel'

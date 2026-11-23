@@ -1324,7 +1324,7 @@ class SmartZip
 
     IsNestedArchiveCandidate(path, ext)
     {
-        if this.IsArchive(ext)
+        if (this.IsArchive(ext) || IsPhotoArchiveCandidate(path, ext))
             return true
 
         if !IsVolumeNameCandidate(path)
@@ -1368,10 +1368,10 @@ class SmartZip
 
         ; Some damaged/partial 7z packages report "not archive" on list, but still yield a more
         ; specific diagnosis on test (header corrupt / truncated / password). Prefer that signal
-        ; for known archive extensions so users no longer only see a generic header error.
+        ; for known extensions or photo-named files with archive signatures.
         if (result.status = ArchiveStatus.NOT_ARCHIVE) {
             SplitPath(path, , , &ext)
-            if (ext != "" && this.IsArchive(ext)) {
+            if (ext != "" && (this.IsArchive(ext) || IsPhotoArchiveCandidate(path, ext))) {
                 tcmd := this.7z ' t -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' commandPath '"'
                 if this.cmdLog
                     this.testLog .= '`n#####`n' RedactDiagnostic(tcmd) '`n'

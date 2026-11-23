@@ -604,6 +604,7 @@ Describe 'PasswordPreflightBehavior' {
         'resolve_does_not_try_remaining_after_header_corrupt',
         'probe_classifies_wrong_password_over_headers',
         'probe_stage_name',
+        'photo_probe_uses_diagnostic_fallback',
         'probe_cmd_list_slt',
         'probe_cmd_bso1',
         'probe_cmd_bse1',

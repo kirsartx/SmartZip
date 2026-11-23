@@ -59,6 +59,18 @@ JoinCandidates(arr) {
 
 host := PasswordPreflightHost()
 
+class PhotoProbeHost extends PasswordPreflightHost {
+    commands := []
+
+    IsArchive(ext) => false
+
+    RunCmdCapture(cmd, encoding := "UTF-8") {
+        this.commands.Push(cmd)
+        return { exitCode: 2, output: InStr(cmd, " t ") ? "Headers Error" : "Cannot open the file as archive",
+            cancelled: false }
+    }
+}
+
 ; --- BuildPasswordCandidates order/dedupe; empty is tested separately by ResolveArchivePassword ---
 host.ResetPasswordState()
 host.lastPass := "last-ok"
@@ -315,6 +327,20 @@ AssertContains(host.lastProbeCmd, "-bso1", "probe_cmd_bso1")
 AssertContains(host.lastProbeCmd, "-bse1", "probe_cmd_bse1")
 AssertContains(host.lastProbeCmd, "-bsp0", "probe_cmd_bsp0")
 AssertContains(host.lastProbeCmd, "-sccUTF-8", "probe_cmd_utf8")
+
+photoPath := A_ScriptDir "\damaged.PNG"
+raw := Buffer(8)
+NumPut("UInt", 0x21726152, "UInt", 0x0001071A, raw)
+fixture := FileOpen(photoPath, "w", "UTF-8-RAW")
+fixture.RawWrite(raw)
+fixture.Close()
+photoHost := PhotoProbeHost()
+photoProbe := photoHost.ProbeArchive(photoPath)
+AssertTrue(photoProbe.status = ArchiveStatus.HEADER_CORRUPT && photoProbe.stage = "probe"
+    && photoHost.commands.Length = 2
+    && photoHost.commands[1] = '7z.exe l -slt -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' photoPath '"'
+    && photoHost.commands[2] = '7z.exe t -bso1 -bse1 -bsp0 -sccUTF-8 -p"" "' photoPath '"',
+    "photo_probe_uses_diagnostic_fallback")
 
 ; Content-encrypted readable-header ZIP/7z: probe exits 0 with Encrypted = + → NEED_PASSWORD
 ; so ResolveArchivePassword is entered (I2). Live 7-Zip ZS form.
