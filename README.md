@@ -16,7 +16,7 @@
  - 压缩
    - 全是文件夹则每个文件夹生成一个压缩包, 否则生成单个压缩包
 
-### 照片副檔名的壓縮包 / Archives with photo extensions
+## 3.6 Kirs.11 照片套殼壓縮包 / Archives with photo extensions
 
 把副檔名是 `.png`、`.jpg` 或 `.jpeg` 的偽裝壓縮包交給「智能解壓」即可，
 無需改名。啟用巢狀解壓時，SmartZip 也會辨識檔頭為 RAR、7z 或 ZIP 的這類檔案，
